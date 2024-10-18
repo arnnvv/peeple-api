@@ -30,4 +30,13 @@ func main() {
 	defer conn.Close(ctx)
 
 	queries := db.New(conn)
+
+	users, err := queries.ListAllUsers(ctx)
+	if err != nil {
+		log.Fatalf("Error fetching users: %v", err)
+	}
+	log.Printf("Found %d users", len(users))
+	for _, user := range users {
+		log.Printf("User: ID=%d, Name=%s, Email=%s", user.ID, user.Name, user.Email)
+	}
 }
