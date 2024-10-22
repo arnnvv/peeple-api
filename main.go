@@ -238,7 +238,6 @@ func main() {
 		if dummyUsers[email] == otp {
 			log.Printf("OTP verified for %s", email)
 
-			// Generate a JWT token (replace with your JWT generation logic)
 			token, err := generateJWT(email)
 			if err != nil {
 				http.Error(w, "Failed to generate token", http.StatusInternalServerError)
