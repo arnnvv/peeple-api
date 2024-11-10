@@ -132,16 +132,19 @@ func handleEmailCheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	email := requestBody.Email
+	emailExists := emailExists(email)
 
-	go func() {
-		if !emailExists(email) {
-			if err := createUser(email); err != nil {
-				log.Printf("Error creating user: %v", err)
-			}
+	// Create the user if they don't exist, then send the response
+	if !emailExists {
+		if err := createUser(email); err != nil {
+			http.Error(w, "Failed to create user", http.StatusInternalServerError)
+			log.Printf("Error creating user: %v", err)
+			return
 		}
-	}()
+		emailExists = true
+	}
 
-	sendJSONResponse(w, CheckEmailResponse{Exists: emailExists(email)})
+	sendJSONResponse(w, CheckEmailResponse{Exists: emailExists})
 }
 
 // emailExists checks if a user exists by email.
