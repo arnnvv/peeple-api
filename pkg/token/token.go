@@ -1,6 +1,7 @@
 package token
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -17,7 +18,7 @@ type Claims struct {
 var jwtSecret = []byte(os.Getenv("JWT_SECRET"))
 
 func GenerateTokenHandler(w http.ResponseWriter, r *http.Request) {
-	// Only allow GET requests
+	// Only allow GET requests.
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
@@ -39,7 +40,7 @@ func GenerateTokenHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	// Create token with HS256 algorithm
+	// Create token with HS256 algorithm.
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenString, err := token.SignedString(jwtSecret)
 	if err != nil {
@@ -52,15 +53,17 @@ func GenerateTokenHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, tokenString)
 }
 
+// AuthMiddleware verifies the token and, if valid, stores the claims in the request's context.
 func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Retrieve the Authorization header.
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
 			http.Error(w, "Authorization header missing", http.StatusUnauthorized)
 			return
 		}
 
-		// Assumes the header is formatted as "Bearer <token>"
+		// Assumes the header is formatted as "Bearer <token>".
 		const bearerPrefix = "Bearer "
 		if len(authHeader) < len(bearerPrefix) {
 			http.Error(w, "Invalid Authorization header", http.StatusBadRequest)
@@ -68,11 +71,11 @@ func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 		tokenString := authHeader[len(bearerPrefix):]
 
+		// Parse the token.
 		claims := &Claims{}
 		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 			return jwtSecret, nil
 		})
-
 		if err != nil {
 			if err == jwt.ErrSignatureInvalid {
 				http.Error(w, "Invalid token signature", http.StatusUnauthorized)
@@ -87,6 +90,8 @@ func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		next.ServeHTTP(w, r)
+		// Store the claims in the request context using a string literal key.
+		ctx := context.WithValue(r.Context(), "claims", claims)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	}
 }

@@ -33,11 +33,13 @@ func main() {
 
 	// Protected endpoint with auth middleware
 	http.HandleFunc("/", token.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		// Retrieve the claims from the context using the string key "claims".
+		claims, ok := r.Context().Value("claims").(*token.Claims)
+		if !ok || claims == nil {
+			http.Error(w, "Failed to retrieve token claims", http.StatusInternalServerError)
 			return
 		}
-		fmt.Fprint(w, "hi")
+		fmt.Fprintf(w, "hi, phone: %s", claims.PhoneNumber)
 	}))
 
 	fmt.Println("Server is running on http://localhost:8080")
