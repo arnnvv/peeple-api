@@ -34,7 +34,7 @@ func main() {
 	// Protected endpoint with auth middleware
 	http.HandleFunc("/", token.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		// Retrieve the claims from the context using the string key "claims".
-		claims, ok := r.Context().Value("claims").(*token.Claims)
+		claims, ok := r.Context().Value(token.ClaimsContextKey).(*token.Claims)
 		if !ok || claims == nil {
 			http.Error(w, "Failed to retrieve token claims", http.StatusInternalServerError)
 			return
