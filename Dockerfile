@@ -22,16 +22,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o api .
 # Distroless
 FROM gcr.io/distroless/static:nonroot
 
-# Define build-time arguments.
-ARG DATABASE_URL
-ARG JWT_SECRET
-
-# Set the environment variables using the build-time arguments.
-# These can be overridden at runtime using docker run -e or in your orchestration.
-ENV DATABASE_URL=${DATABASE_URL}
-ENV JWT_SECRET=${JWT_SECRET}
-
 # Copy the statically compiled binary from the builder stage.
+COPY --from=builder /app/.env .
 COPY --from=builder /app/api /api
 
 # Expose the port that your API listens on.
