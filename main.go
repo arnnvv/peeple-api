@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
@@ -11,12 +12,6 @@ import (
 	"github.com/arnnvv/peeple-api/pkg/envloader"
 	"github.com/arnnvv/peeple-api/pkg/token"
 	"github.com/jackc/pgx/v5/pgxpool"
-)
-
-// Pre-allocated responses
-var (
-	helloResponse   = []byte("hi, phone: ")
-	errClaimsFailed = []byte("Failed to retrieve token claims")
 )
 
 func main() {
@@ -67,14 +62,21 @@ func main() {
 func protectedHandler(w http.ResponseWriter, r *http.Request) {
 	claims, ok := r.Context().Value(token.ClaimsContextKey).(*token.Claims)
 	if !ok || claims == nil {
-		w.Header().Set("Content-Type", "text/plain")
+		// Respond with JSON error message
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write(errClaimsFailed)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Failed to retrieve token claims",
+		})
 		return
 	}
 
-	// Optimized response writing
-	w.Header().Set("Content-Type", "text/plain")
-	w.Write(helloResponse)
-	w.Write([]byte(claims.PhoneNumber))
+	// Build the JSON response with the phone number
+	response := map[string]string{
+		"phone_number": claims.PhoneNumber,
+	}
+
+	// Set header and send response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }
