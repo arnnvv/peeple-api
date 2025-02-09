@@ -30,8 +30,9 @@ func main() {
 	}
 
 	// Configure routes
-	http.HandleFunc("/token", token.GenerateTokenHandler)
 	http.HandleFunc("/", token.AuthMiddleware(handlers.ProtectedHandler))
+	http.HandleFunc("/token", token.GenerateTokenHandler)
+	http.HandleFunc("/new", handlers.CreateNewUser)
 
 	log.Println("Server is running on http://localhost:8080")
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
