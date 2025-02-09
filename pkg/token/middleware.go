@@ -1,54 +1,48 @@
+// middleware.go
 package token
 
 import (
 	"context"
-	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
+var (
+	errInvalidHeader = []byte("Invalid Authorization header format")
+	errInvalidToken  = []byte("Invalid token")
+)
+
 func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	parser := jwt.NewParser(
+		jwt.WithoutClaimsValidation(),
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+	)
+	secret := getSecret()
+
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Extract Authorization header
 		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			http.Error(w, "Authorization header required", http.StatusUnauthorized)
+		prefix, tokenString, ok := strings.Cut(authHeader, " ")
+		if !ok || !strings.EqualFold(prefix, "Bearer") {
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write(errInvalidHeader)
 			return
 		}
 
-		// Validate Bearer token format
-		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-		if tokenString == authHeader {
-			http.Error(w, "Invalid Authorization header format", http.StatusUnauthorized)
-			return
-		}
-
-		// Retrieve JWT secret
-		secret := os.Getenv("JWT_SECRET")
-		if secret == "" {
-			http.Error(w, "Server configuration error", http.StatusInternalServerError)
-			return
-		}
-
-		// Parse and validate token
 		claims := &Claims{}
-		token, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (interface{}, error) {
-			// Validate signing method
-			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
-			}
-			return []byte(secret), nil
+		token, err := parser.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (interface{}, error) {
+			return secret, nil
 		})
 
 		if err != nil || !token.Valid {
-			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write(errInvalidToken)
 			return
 		}
 
-		// Add claims to request context
 		ctx := context.WithValue(r.Context(), ClaimsContextKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	}
