@@ -6,7 +6,6 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/arnnvv/peeple-api/pkg/envloader"
 	"github.com/arnnvv/peeple-api/pkg/handlers"
 	"github.com/arnnvv/peeple-api/pkg/token"
 )
@@ -14,11 +13,6 @@ import (
 func main() {
 	// Utilize all available CPUs
 	runtime.GOMAXPROCS(runtime.NumCPU())
-
-	// Load environment variables
-	if err := envloader.LoadEnv(".env"); err != nil {
-		log.Fatalf("Error loading .env: %v", err)
-	}
 
 	// Configure HTTP server with timeouts
 	server := &http.Server{
