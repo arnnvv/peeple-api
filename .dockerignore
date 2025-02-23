@@ -3,3 +3,4 @@ api
 .git
 .github
 .gitignore
+.env.example
