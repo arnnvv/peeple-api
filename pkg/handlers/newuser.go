@@ -2,8 +2,12 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"unicode"
+
+	"github.com/arnnvv/peeple-api/db"
+	"gorm.io/gorm"
 )
 
 type createUserRequest struct {
@@ -69,6 +73,32 @@ func CreateNewUser(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+	}
+
+	//Now I want you to create a code that inserts just a phone number in the users table
+	newUser := db.UserModel{
+		PhoneNumber: req.PhoneNumber,
+	}
+
+	result := db.DB.Create(&newUser)
+
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrDuplicatedKey) {
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(CreateUserResponse{
+				Success: false,
+				Message: "Phone number already exists",
+			})
+			return
+		}
+
+		// Handle other database errors
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(CreateUserResponse{
+			Success: false,
+			Message: "Error creating user",
+		})
+		return
 	}
 
 	// Return success response with user ID and phone number
