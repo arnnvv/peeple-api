@@ -1,13 +1,9 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
-	"log"
 	"net/http"
 	"unicode"
-
-	"github.com/arnnvv/peeple-api/pkg/dbpackage"
 )
 
 type createUserRequest struct {
@@ -73,18 +69,6 @@ func CreateNewUser(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-	}
-	q := dbpackage.GetDB()
-
-	_, err := q.CreateUser(context.Background(), req.PhoneNumber)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError) // 500 Internal Server Error
-		json.NewEncoder(w).Encode(CreateUserResponse{
-			Success: false,
-			Message: "Failed to create user in database",
-		})
-		log.Printf("Error creating user: %v", err) // Log the error for debugging
-		return
 	}
 
 	// Return success response with user ID and phone number

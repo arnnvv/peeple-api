@@ -3,9 +3,11 @@ package main
 import (
 	"log"
 	"net/http"
+	"os"
 	"runtime"
 	"time"
 
+	"github.com/arnnvv/peeple-api/db"
 	"github.com/arnnvv/peeple-api/pkg/handlers"
 	"github.com/arnnvv/peeple-api/pkg/token"
 )
@@ -13,6 +15,10 @@ import (
 func main() {
 	// Utilize all available CPUs
 	runtime.GOMAXPROCS(runtime.NumCPU())
+
+	if err := db.InitDB(os.Getenv("DATABASE_URL")); err != nil {
+		log.Fatalf("Database connection failed: %v", err)
+	}
 
 	// Configure HTTP server with timeouts
 	server := &http.Server{
