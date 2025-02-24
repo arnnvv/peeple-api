@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -22,6 +23,25 @@ type UploadURL struct {
 	Filename string `json:"filename"`
 	Type     string `json:"type"`
 	URL      string `json:"url"`
+}
+
+var allowedMimeTypes = map[string]bool{
+	"image/jpeg":      true,
+	"image/png":       true,
+	"image/gif":       true,
+	"image/webp":      true,
+	"image/tiff":      true,
+	"image/svg+xml":   true,
+	"video/mp4":       true,
+	"video/mpeg":      true,
+	"video/ogg":       true,
+	"video/webm":      true,
+	"video/x-msvideo": true, // AVI
+	"video/quicktime": true, // MOV
+}
+
+func isAllowedFileType(mimeType string) bool {
+	return allowedMimeTypes[strings.ToLower(mimeType)]
 }
 
 func GeneratePresignedURLs(w http.ResponseWriter, r *http.Request) {
@@ -64,7 +84,6 @@ func GeneratePresignedURLs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-
 	// Create AWS session
 	sess := session.Must(session.NewSession(&aws.Config{
 		Region:      aws.String(awsRegion),
@@ -78,6 +97,12 @@ func GeneratePresignedURLs(w http.ResponseWriter, r *http.Request) {
 	for _, file := range requestBody.Files {
 		if file.Filename == "" || file.Type == "" {
 			http.Error(w, "Filename and type are required for all files",
+				http.StatusBadRequest)
+			return
+		}
+
+		if !isAllowedFileType(file.Type) {
+			http.Error(w, fmt.Sprintf("File type %s is not allowed. Only image and video files are permitted.", file.Type),
 				http.StatusBadRequest)
 			return
 		}
