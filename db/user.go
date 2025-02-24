@@ -1,49 +1,105 @@
 package db
 
 import (
-	"database/sql/driver"
-	"encoding/json"
-	"fmt"
-	"time"
-
-	"github.com/arnnvv/peeple-api/pkg/enums"
-	"gorm.io/gorm"
+    "database/sql/driver"
+    "encoding/json"
+    "fmt"
+    "time"
+    "strings"
+    "github.com/arnnvv/peeple-api/pkg/enums"
+    "gorm.io/gorm"
 )
+
+type CustomDate time.Time
+
+func (cd CustomDate) IsZero() bool {
+    return time.Time(cd).IsZero()
+}
+
+func (cd *CustomDate) UnmarshalJSON(b []byte) error {
+    s := strings.Trim(string(b), "\"")
+    t, err := time.Parse("2006-01-02", s)
+    if err != nil {
+        return err
+    }
+    *cd = CustomDate(t)
+    return nil
+}
+
+func (cd CustomDate) MarshalJSON() ([]byte, error) {
+    return json.Marshal(time.Time(cd).Format("2006-01-02"))
+}
+
+func (cd CustomDate) Value() (driver.Value, error) {
+    return time.Time(cd), nil
+}
+
+func (cd *CustomDate) Scan(value any) error {
+    if value == nil {
+        return nil
+    }
+    switch v := value.(type) {
+    case time.Time:
+        *cd = CustomDate(v)
+        return nil
+    default:
+        return fmt.Errorf("unsupported type for CustomDate: %T", value)
+    }
+}
 
 // UserModel represents a user in the system
 type UserModel struct {
-	gorm.Model
-	Name             *string                      `json:"name"`
-	LastName         *string                      `json:"last_name"`
-	PhoneNumber      string                       `json:"phone_number" gorm:"unique;not null"`
-	DateOfBirth      *time.Time                   `json:"date_of_birth"`
-	Latitude         *float64                     `json:"latitude"`
-	Longitude        *float64                     `json:"longitude"`
-	Gender           *enums.Gender                `json:"gender" gorm:"type:text"`
-	DatingIntention  *enums.DatingIntention       `json:"dating_intention" gorm:"type:text"`
-	Height           *string                      `json:"height"`
-	Hometown         *string                      `json:"hometown"`
-	JobTitle         *string                      `json:"job_title"`
-	Education        *string                      `json:"education"`
-	ReligiousBeliefs *enums.Religion              `json:"religious_beliefs" gorm:"type:text"`
-	DrinkingHabit    *enums.DrinkingSmokingHabits `json:"drinking_habit" gorm:"type:text"`
-	SmokingHabit     *enums.DrinkingSmokingHabits `json:"smoking_habit" gorm:"type:text"`
-	MediaURLs        []string                     `json:"media_urls" gorm:"type:text[]"`
-	Prompts          []Prompt                     `json:"prompts" gorm:"foreignKey:UserID"`
-	AudioPrompt      *AudioPromptModel            `json:"audio_prompt" gorm:"foreignKey:UserID"`
+    gorm.Model
+    Name             *string                      `json:"name"`
+    LastName         *string                      `json:"last_name"`
+    PhoneNumber      *string  `json:"phone_number" gorm:"unique"` 
+    DateOfBirth      CustomDate                   `json:"date_of_birth"`
+    Latitude         *float64                     `json:"latitude"`
+    Longitude        *float64                     `json:"longitude"`
+    Gender           *enums.Gender                `json:"gender" gorm:"type:text"`
+    DatingIntention  *enums.DatingIntention       `json:"dating_intention" gorm:"type:text"`
+    Height           *string                      `json:"height"`
+    Hometown         *string                      `json:"hometown"`
+    JobTitle         *string                      `json:"job_title"`
+    Education        *string                      `json:"education"`
+    ReligiousBeliefs *enums.Religion              `json:"religious_beliefs" gorm:"type:text"`
+    DrinkingHabit    *enums.DrinkingSmokingHabits `json:"drinking_habit" gorm:"type:text"`
+    SmokingHabit     *enums.DrinkingSmokingHabits `json:"smoking_habit" gorm:"type:text"`
+    MediaURLs        []string                     `json:"media_urls" gorm:"type:text[]"`
+    Prompts          []Prompt                     `json:"prompts" gorm:"foreignKey:UserID"`
+    AudioPrompt      *AudioPromptModel            `json:"audio_prompt" gorm:"foreignKey:UserID"`
+}
+
+func (u UserModel) String() string {
+    return fmt.Sprintf(
+        "User[ID:%d Name:%v Phone:%s]",
+        u.ID,
+        u.Name,
+        u.PhoneNumber,
+    )
 }
 
 // TableName specifies the table name for UserModel
 func (UserModel) TableName() string {
-	return "users"
+    return "users"
 }
 
-// BeforeSave hook for UserModel
+// Replace the logDatabaseAction function with:
+func logDatabaseAction(tx *gorm.DB) {
+    fmt.Printf("[DB Operation] SQL: %s\nParams: %+v\n", 
+        tx.Statement.SQL.String(),
+        tx.Statement.Vars,
+    )
+}
+
+// Keep the BeforeSave hook as:
 func (u *UserModel) BeforeSave(tx *gorm.DB) error {
-	if u.PhoneNumber == "" {
-		return tx.AddError(gorm.ErrInvalidField)
-	}
-	return nil
+    fmt.Printf("[DB Hook] BeforeSave - PhoneNumber: %v\n", u.PhoneNumber)
+    if u.PhoneNumber == nil || *u.PhoneNumber == "" {
+        return tx.AddError(gorm.ErrInvalidField)
+    }
+    logDatabaseAction(tx)
+    return nil
 }
 
 // Scan implementations for enum types
@@ -52,33 +108,33 @@ type StringArray []string
 
 // Scan implements the sql.Scanner interface for StringArray
 func (sa *StringArray) Scan(value any) error {
-	if value == nil {
-		*sa = nil
-		return nil
-	}
-	switch v := value.(type) {
-	case []byte:
-		return json.Unmarshal(v, sa)
-	case string:
-		return json.Unmarshal([]byte(v), sa)
-	default:
-		return fmt.Errorf("unsupported type for StringArray: %T", value)
-	}
+    if value == nil {
+        *sa = nil
+        return nil
+    }
+    switch v := value.(type) {
+    case []byte:
+        return json.Unmarshal(v, sa)
+    case string:
+        return json.Unmarshal([]byte(v), sa)
+    default:
+        return fmt.Errorf("unsupported type for StringArray: %T", value)
+    }
 }
 
 // Value implements the driver.Valuer interface for StringArray
 func (sa StringArray) Value() (driver.Value, error) {
-	if sa == nil {
-		return nil, nil
-	}
-	return json.Marshal(sa)
+    if sa == nil {
+        return nil, nil
+    }
+    return json.Marshal(sa)
 }
 
 // AutoMigrate creates or updates the database schema
 func AutoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(
-		&UserModel{},
-		&Prompt{},
-		&AudioPromptModel{},
-	)
+    return db.AutoMigrate(
+        &UserModel{},
+        &Prompt{},
+        &AudioPromptModel{},
+    )
 }

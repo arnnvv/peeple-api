@@ -34,6 +34,7 @@ func main() {
 	http.HandleFunc("/token", token.GenerateTokenHandler)
 	http.HandleFunc("/new", handlers.CreateNewUser)
 	http.HandleFunc("/upload", token.AuthMiddleware(handlers.GeneratePresignedURLs))
+  http.HandleFunc("/api/profile", token.AuthMiddleware(handlers.CreateProfile))
 
 	log.Println("Server is running on http://localhost:8080")
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
