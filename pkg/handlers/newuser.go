@@ -22,7 +22,6 @@ type CreateUserResponse struct {
 func CreateNewUser(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	// Validate HTTP method
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		json.NewEncoder(w).Encode(CreateUserResponse{
@@ -32,7 +31,6 @@ func CreateNewUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Decode request body
 	var req createUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -43,7 +41,6 @@ func CreateNewUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate phone number
 	if req.PhoneNumber == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(CreateUserResponse{
@@ -53,7 +50,6 @@ func CreateNewUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check length exactly 10 digits
 	if len(req.PhoneNumber) != 10 {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(CreateUserResponse{
@@ -63,7 +59,6 @@ func CreateNewUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check all characters are digits
 	for _, c := range req.PhoneNumber {
 		if !unicode.IsDigit(c) {
 			w.WriteHeader(http.StatusBadRequest)
@@ -75,24 +70,31 @@ func CreateNewUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	//Now I want you to create a code that inserts just a phone number in the users table
+	// Check for existing phone number using First()
+	var existingUser db.UserModel
+	result := db.DB.Where("phone_number = ?", req.PhoneNumber).First(&existingUser)
+	if result.Error == nil {
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(CreateUserResponse{
+			Success: false,
+			Message: "Phone number already exists",
+		})
+		return
+	} else if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(CreateUserResponse{
+			Success: false,
+			Message: "Error checking user existence",
+		})
+		return
+	}
+
 	newUser := db.UserModel{
 		PhoneNumber: req.PhoneNumber,
 	}
 
-	result := db.DB.Create(&newUser)
-
-	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrDuplicatedKey) {
-			w.WriteHeader(http.StatusConflict)
-			json.NewEncoder(w).Encode(CreateUserResponse{
-				Success: false,
-				Message: "Phone number already exists",
-			})
-			return
-		}
-
-		// Handle other database errors
+	createResult := db.DB.Create(&newUser)
+	if createResult.Error != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(CreateUserResponse{
 			Success: false,
@@ -101,7 +103,7 @@ func CreateNewUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return success response with user ID and phone number
+	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(CreateUserResponse{
 		Success: true,
 		Message: "User created successfully",
