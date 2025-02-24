@@ -51,7 +51,7 @@ func (u *UserModel) BeforeSave(tx *gorm.DB) error {
 type StringArray []string
 
 // Scan implements the sql.Scanner interface for StringArray
-func (sa *StringArray) Scan(value interface{}) error {
+func (sa *StringArray) Scan(value any) error {
 	if value == nil {
 		*sa = nil
 		return nil
