@@ -55,10 +55,15 @@ func GeneratePresignedURLs(w http.ResponseWriter, r *http.Request) {
 
 	// Validate file count between 3-6
 	fileCount := len(requestBody.Files)
-	if fileCount < 3 || fileCount > 6 {
-		http.Error(w, "Requires between 3 and 6 files", http.StatusBadRequest)
+	if fileCount < 3 {
+		http.Error(w, "Requires minnimum 3 files", http.StatusBadRequest)
 		return
 	}
+	if fileCount > 6 {
+		http.Error(w, "Requires maximum 6 files", http.StatusBadRequest)
+		return
+	}
+
 
 	// Create AWS session
 	sess := session.Must(session.NewSession(&aws.Config{
@@ -72,7 +77,7 @@ func GeneratePresignedURLs(w http.ResponseWriter, r *http.Request) {
 
 	for _, file := range requestBody.Files {
 		if file.Filename == "" || file.Type == "" {
-			http.Error(w, "Filename and type are required for all files", 
+			http.Error(w, "Filename and type are required for all files",
 				http.StatusBadRequest)
 			return
 		}
@@ -87,7 +92,7 @@ func GeneratePresignedURLs(w http.ResponseWriter, r *http.Request) {
 
 		url, err := req.Presign(15 * time.Minute)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Failed to generate URL for %s: %v", 
+			http.Error(w, fmt.Sprintf("Failed to generate URL for %s: %v",
 				file.Filename, err), http.StatusInternalServerError)
 			return
 		}
