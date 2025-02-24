@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -12,12 +13,24 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 )
 
-func GeneratePresignedURL(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+type FileRequest struct {
+	Filename string `json:"filename"`
+	Type     string `json:"type"`
+}
+
+type UploadURL struct {
+	Filename string `json:"filename"`
+	Type     string `json:"type"`
+	URL      string `json:"url"`
+}
+
+func GeneratePresignedURLs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
+	// Get AWS configuration from environment
 	awsRegion := os.Getenv("AWS_REGION")
 	awsAccessKey := os.Getenv("AWS_ACCESS_KEY_ID")
 	awsSecretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
@@ -25,40 +38,68 @@ func GeneratePresignedURL(w http.ResponseWriter, r *http.Request) {
 
 	// Validate configuration
 	if awsRegion == "" || awsAccessKey == "" || awsSecretKey == "" || s3Bucket == "" {
-		http.Error(w, "Somethin Missing", http.StatusInternalServerError)
+		http.Error(w, "Missing AWS configuration", http.StatusInternalServerError)
 		return
 	}
 
+	// Decode JSON request body
+	var requestBody struct {
+		Files []FileRequest `json:"files"`
+	}
+
+	err := json.NewDecoder(r.Body).Decode(&requestBody)
+	if err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate exactly 6 files
+	if len(requestBody.Files) != 6 {
+		http.Error(w, "Exactly 6 files required", http.StatusBadRequest)
+		return
+	}
+
+	// Create AWS session
 	sess := session.Must(session.NewSession(&aws.Config{
 		Region:      aws.String(awsRegion),
 		Credentials: credentials.NewStaticCredentials(awsAccessKey, awsSecretKey, ""),
 	}))
 
 	svc := s3.New(sess)
+	var uploadURLs []UploadURL
+	datePrefix := time.Now().Format("2006-01-02")
 
-	query := r.URL.Query()
-	filename := query.Get("filename")
-	fileType := query.Get("type")
+	for _, file := range requestBody.Files {
+		if file.Filename == "" || file.Type == "" {
+			http.Error(w, "Filename and type are required for all files",
+				http.StatusBadRequest)
+			return
+		}
 
-	if filename == "" || fileType == "" {
-		http.Error(w, "filename and type parameters required", http.StatusBadRequest)
-		return
-	}
+		key := fmt.Sprintf("uploads/%s/%s", datePrefix, file.Filename)
 
-	key := fmt.Sprintf("uploads/%s/%s", time.Now().Format("2006-01-02"), filename)
+		req, _ := svc.PutObjectRequest(&s3.PutObjectInput{
+			Bucket:      aws.String(s3Bucket),
+			Key:         aws.String(key),
+			ContentType: aws.String(file.Type),
+		})
 
-	req, _ := svc.PutObjectRequest(&s3.PutObjectInput{
-		Bucket:      aws.String(s3Bucket),
-		Key:         aws.String(key),
-		ContentType: aws.String(fileType),
-	})
+		url, err := req.Presign(15 * time.Minute)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to generate URL for %s: %v",
+				file.Filename, err), http.StatusInternalServerError)
+			return
+		}
 
-	url, err := req.Presign(15 * time.Minute)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		uploadURLs = append(uploadURLs, UploadURL{
+			Filename: file.Filename,
+			Type:     file.Type,
+			URL:      url,
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"url":"%s"}`, url)
+	json.NewEncoder(w).Encode(map[string][]UploadURL{
+		"uploads": uploadURLs,
+	})
 }
