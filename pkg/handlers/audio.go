@@ -66,7 +66,7 @@ func GenerateAudioPresignedURL(w http.ResponseWriter, r *http.Request) {
 	awsRegion := os.Getenv("AWS_REGION")
 	awsAccessKey := os.Getenv("AWS_ACCESS_KEY_ID")
 	awsSecretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
-	s3Bucket := os.Getenv("S3_BUCKET_AUDIO") // Consider separate bucket for audio
+	s3Bucket := os.Getenv("S3_BUCKET")
 
 	if awsRegion == "" || awsAccessKey == "" || awsSecretKey == "" || s3Bucket == "" {
 		http.Error(w, "Missing AWS configuration", http.StatusInternalServerError)
