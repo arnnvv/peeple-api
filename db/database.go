@@ -42,6 +42,7 @@ func InitDB(dsn string) error {
 		&UserModel{},
 		&Prompt{},
 		&AudioPromptModel{},
+		&OTPModel{}, 
 	)
 
 	return err

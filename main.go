@@ -32,12 +32,30 @@ func main() {
 	// Configure routes
 	http.HandleFunc("/", token.AuthMiddleware(handlers.ProtectedHandler))
 	http.HandleFunc("/token", token.GenerateTokenHandler)
-	http.HandleFunc("/new", handlers.CreateNewUser)
 	http.HandleFunc("/upload", token.AuthMiddleware(handlers.GeneratePresignedURLs))
-  http.HandleFunc("/api/profile", token.AuthMiddleware(handlers.CreateProfile))
+	http.HandleFunc("/api/profile", token.AuthMiddleware(handlers.CreateProfile))
+	
+	// Add new OTP routes
+	http.HandleFunc("/api/send-otp", handlers.SendOTP)
+	http.HandleFunc("/api/verify-otp", handlers.VerifyOTP)
+
+	// Start a goroutine to periodically clean up expired OTPs
+	go cleanupExpiredOTPs()
 
 	log.Println("Server is running on http://localhost:8080")
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
+	}
+}
+
+// cleanupExpiredOTPs periodically removes expired OTPs from the database
+func cleanupExpiredOTPs() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	
+	for range ticker.C {
+		if err := db.DeleteExpiredOTPs(); err != nil {
+			log.Printf("Error cleaning up expired OTPs: %v", err)
+		}
 	}
 }

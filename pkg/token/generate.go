@@ -29,6 +29,21 @@ func getSecret() []byte {
     return jwtSecret
 }
 
+// GenerateToken creates a new JWT token for a user ID
+func GenerateToken(userID uint) (string, error) {
+    // Create and sign token with only UserID
+    token := jwt.NewWithClaims(jwt.SigningMethodHS256, &Claims{
+        UserID: userID,
+    })
+
+    tokenString, err := token.SignedString(getSecret())
+    if err != nil {
+        return "", err
+    }
+
+    return tokenString, nil
+}
+
 func GenerateTokenHandler(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", "application/json")
 
@@ -94,12 +109,8 @@ func GenerateTokenHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    // Create and sign token with only UserID
-    token := jwt.NewWithClaims(jwt.SigningMethodHS256, &Claims{
-        UserID: user.ID,
-    })
-
-    tokenString, err := token.SignedString(getSecret())
+    // Generate token using the extracted function
+    tokenString, err := GenerateToken(user.ID)
     if err != nil {
         w.WriteHeader(http.StatusInternalServerError)
         json.NewEncoder(w).Encode(TokenResponse{
