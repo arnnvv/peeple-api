@@ -112,21 +112,31 @@ func CreateProfile(w http.ResponseWriter, r *http.Request) {
 
     // Handle prompts
     fmt.Printf("[Prompts] Processing %d prompts\n", len(existingUser.Prompts))
-    if len(existingUser.Prompts) > 0 {
-        fmt.Printf("[Prompts] Deleting existing prompts for user %d\n", existingUser.ID)
-        if err := db.DB.Where("user_id = ?", existingUser.ID).Delete(&db.Prompt{}).Error; err != nil {
-            fmt.Printf("[Prompts Delete Error] %v\n", err)
-            respondError(w, "Failed to update prompts", http.StatusInternalServerError)
-            return
-        }
-        
-        fmt.Printf("[Prompts] Creating %d new prompts\n", len(existingUser.Prompts))
-        if err := db.DB.Create(&existingUser.Prompts).Error; err != nil {
-            fmt.Printf("[Prompts Create Error] %v\n", err)
-            respondError(w, "Failed to save prompts", http.StatusInternalServerError)
-            return
-        }
+if len(existingUser.Prompts) > 0 {
+    // Delete existing prompts
+    if err := db.DB.Where("user_id = ?", existingUser.ID).Delete(&db.Prompt{}).Error; err != nil {
+        fmt.Printf("[Prompts Delete Error] %v\n", err)
+        respondError(w, "Failed to update prompts", http.StatusInternalServerError)
+        return
     }
+    
+    // Create new prompts without IDs
+    var newPrompts []db.Prompt
+    for _, p := range existingUser.Prompts {
+        newPrompts = append(newPrompts, db.Prompt{
+            UserID:   existingUser.ID,
+            Category: p.Category,
+            Question: p.Question,
+            Answer:   p.Answer,
+        })
+    }
+    
+    if err := db.DB.Create(&newPrompts).Error; err != nil {
+        fmt.Printf("[Prompts Create Error] %v\n", err)
+        respondError(w, "Failed to save prompts", http.StatusInternalServerError)
+        return
+    }
+}
 
     fmt.Println("[Success] Profile updated successfully")
     json.NewEncoder(w).Encode(map[string]interface{}{
