@@ -1,15 +1,15 @@
-
 package handlers
 
 import (
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net/http"
 	"time"
 	"unicode"
+	"encoding/json"
 
 	"github.com/arnnvv/peeple-api/db"
+	"github.com/arnnvv/peeple-api/pkg/utils"
 )
 
 // SendOTPRequest represents the request to send an OTP
@@ -29,7 +29,7 @@ func SendOTP(w http.ResponseWriter, r *http.Request) {
 
 	// Only allow POST method
 	if r.Method != http.MethodPost {
-		respondWithJSON(w, http.StatusMethodNotAllowed, SendOTPResponse{
+		utils.RespondWithJSON(w, http.StatusMethodNotAllowed, SendOTPResponse{
 			Success: false,
 			Message: "Only POST method allowed",
 		})
@@ -39,7 +39,7 @@ func SendOTP(w http.ResponseWriter, r *http.Request) {
 	// Parse request body
 	var req SendOTPRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondWithJSON(w, http.StatusBadRequest, SendOTPResponse{
+		utils.RespondWithJSON(w, http.StatusBadRequest, SendOTPResponse{
 			Success: false,
 			Message: "Invalid request body",
 		})
@@ -48,7 +48,7 @@ func SendOTP(w http.ResponseWriter, r *http.Request) {
 
 	// Validate phone number
 	if err := validatePhoneNumber(req.PhoneNumber); err != nil {
-		respondWithJSON(w, http.StatusBadRequest, SendOTPResponse{
+		utils.RespondWithJSON(w, http.StatusBadRequest, SendOTPResponse{
 			Success: false,
 			Message: err.Error(),
 		})
@@ -60,7 +60,7 @@ func SendOTP(w http.ResponseWriter, r *http.Request) {
 
 	// Store OTP in database with 3-minute TTL
 	if err := db.CreateOTP(req.PhoneNumber, otpCode, 3*time.Minute); err != nil {
-		respondWithJSON(w, http.StatusInternalServerError, SendOTPResponse{
+		utils.RespondWithJSON(w, http.StatusInternalServerError, SendOTPResponse{
 			Success: false,
 			Message: "Failed to create OTP",
 		})
@@ -71,7 +71,7 @@ func SendOTP(w http.ResponseWriter, r *http.Request) {
 	sendOTPViaSMS(req.PhoneNumber, otpCode)
 
 	// Return success response
-	respondWithJSON(w, http.StatusOK, SendOTPResponse{
+	utils.RespondWithJSON(w, http.StatusOK, SendOTPResponse{
 		Success: true,
 		Message: "OTP sent successfully",
 	})
@@ -112,10 +112,4 @@ func sendOTPViaSMS(phoneNumber, otpCode string) {
 	// This is a placeholder function
 	// Implementation will be added later
 	fmt.Printf("Sending OTP %s to %s\n", otpCode, phoneNumber)
-}
-
-// respondWithJSON sends a JSON response
-func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
-	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(payload)
 }

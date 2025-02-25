@@ -1,4 +1,3 @@
-
 package handlers
 
 import (
@@ -8,6 +7,7 @@ import (
 
 	"github.com/arnnvv/peeple-api/db"
 	"github.com/arnnvv/peeple-api/pkg/token"
+	"github.com/arnnvv/peeple-api/pkg/utils"
 	"gorm.io/gorm"
 )
 
@@ -30,7 +30,7 @@ func VerifyOTP(w http.ResponseWriter, r *http.Request) {
 
 	// Only allow POST method
 	if r.Method != http.MethodPost {
-		respondWithJSON(w, http.StatusMethodNotAllowed, VerifyOTPResponse{
+		utils.RespondWithJSON(w, http.StatusMethodNotAllowed, VerifyOTPResponse{
 			Success: false,
 			Message: "Only POST method allowed",
 		})
@@ -40,7 +40,7 @@ func VerifyOTP(w http.ResponseWriter, r *http.Request) {
 	// Parse request body
 	var req VerifyOTPRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondWithJSON(w, http.StatusBadRequest, VerifyOTPResponse{
+		utils.RespondWithJSON(w, http.StatusBadRequest, VerifyOTPResponse{
 			Success: false,
 			Message: "Invalid request body",
 		})
@@ -49,7 +49,7 @@ func VerifyOTP(w http.ResponseWriter, r *http.Request) {
 
 	// Validate phone number
 	if err := validatePhoneNumber(req.PhoneNumber); err != nil {
-		respondWithJSON(w, http.StatusBadRequest, VerifyOTPResponse{
+		utils.RespondWithJSON(w, http.StatusBadRequest, VerifyOTPResponse{
 			Success: false,
 			Message: err.Error(),
 		})
@@ -58,7 +58,7 @@ func VerifyOTP(w http.ResponseWriter, r *http.Request) {
 
 	// Validate OTP code
 	if req.OTPCode == "" {
-		respondWithJSON(w, http.StatusBadRequest, VerifyOTPResponse{
+		utils.RespondWithJSON(w, http.StatusBadRequest, VerifyOTPResponse{
 			Success: false,
 			Message: "OTP code is required",
 		})
@@ -68,7 +68,7 @@ func VerifyOTP(w http.ResponseWriter, r *http.Request) {
 	// Verify OTP
 	isValid, err := db.VerifyOTP(req.PhoneNumber, req.OTPCode)
 	if err != nil {
-		respondWithJSON(w, http.StatusInternalServerError, VerifyOTPResponse{
+		utils.RespondWithJSON(w, http.StatusInternalServerError, VerifyOTPResponse{
 			Success: false,
 			Message: "Failed to verify OTP",
 		})
@@ -76,7 +76,7 @@ func VerifyOTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !isValid {
-		respondWithJSON(w, http.StatusUnauthorized, VerifyOTPResponse{
+		utils.RespondWithJSON(w, http.StatusUnauthorized, VerifyOTPResponse{
 			Success: false,
 			Message: "Invalid or expired OTP",
 		})
@@ -86,7 +86,7 @@ func VerifyOTP(w http.ResponseWriter, r *http.Request) {
 	// Create or get user
 	userID, err := createOrGetUser(req.PhoneNumber)
 	if err != nil {
-		respondWithJSON(w, http.StatusInternalServerError, VerifyOTPResponse{
+		utils.RespondWithJSON(w, http.StatusInternalServerError, VerifyOTPResponse{
 			Success: false,
 			Message: "Failed to create user",
 		})
@@ -96,7 +96,7 @@ func VerifyOTP(w http.ResponseWriter, r *http.Request) {
 	// Generate JWT token
 	tokenString, err := generateToken(userID)
 	if err != nil {
-		respondWithJSON(w, http.StatusInternalServerError, VerifyOTPResponse{
+		utils.RespondWithJSON(w, http.StatusInternalServerError, VerifyOTPResponse{
 			Success: false,
 			Message: "Failed to generate token",
 		})
@@ -104,7 +104,7 @@ func VerifyOTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return success response with token
-	respondWithJSON(w, http.StatusOK, VerifyOTPResponse{
+	utils.RespondWithJSON(w, http.StatusOK, VerifyOTPResponse{
 		Success: true,
 		Message: "OTP verified successfully",
 		Token:   tokenString,
