@@ -33,6 +33,7 @@ func main() {
 	http.HandleFunc("/", token.AuthMiddleware(handlers.ProtectedHandler))
 	http.HandleFunc("/token", token.GenerateTokenHandler)
 	http.HandleFunc("/upload", token.AuthMiddleware(handlers.GeneratePresignedURLs))
+	http.HandleFunc("/audio", token.AuthMiddleware(handlers.GenerateAudioPresignedURL))
 	http.HandleFunc("/get-profile", token.AuthMiddleware(handlers.ProfileHandler))
 	http.HandleFunc("/api/profile", token.AuthMiddleware(handlers.CreateProfile))
 	http.HandleFunc("/api/auth-status", token.AuthMiddleware(handlers.CheckAuthStatus))
