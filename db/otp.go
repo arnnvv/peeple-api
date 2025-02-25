@@ -1,4 +1,3 @@
-
 package db
 
 import (
@@ -46,7 +45,7 @@ func CreateOTP(phoneNumber, otpCode string, ttl time.Duration) error {
 func VerifyOTP(phoneNumber, otpCode string) (bool, error) {
 	var otp OTPModel
 	result := DB.Where("phone_number = ?", phoneNumber).First(&otp)
-	
+
 	if result.Error != nil {
 		if result.Error == gorm.ErrRecordNotFound {
 			return false, nil

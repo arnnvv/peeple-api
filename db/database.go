@@ -10,7 +10,7 @@ var DB *gorm.DB
 
 func InitDB(dsn string) error {
 	var err error
-        gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	// Initialize GORM with PostgreSQL driver
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
 		PrepareStmt:            true,
@@ -42,7 +42,7 @@ func InitDB(dsn string) error {
 		&UserModel{},
 		&Prompt{},
 		&AudioPromptModel{},
-		&OTPModel{}, 
+		&OTPModel{},
 	)
 
 	return err

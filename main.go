@@ -52,7 +52,7 @@ func main() {
 func cleanupExpiredOTPs() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
-	
+
 	for range ticker.C {
 		if err := db.DeleteExpiredOTPs(); err != nil {
 			log.Printf("Error cleaning up expired OTPs: %v", err)

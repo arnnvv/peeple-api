@@ -31,17 +31,17 @@ func getSecret() []byte {
 
 // GenerateToken creates a new JWT token for a user ID
 func GenerateToken(userID uint) (string, error) {
-    // Create and sign token with only UserID
-    token := jwt.NewWithClaims(jwt.SigningMethodHS256, &Claims{
-        UserID: userID,
-    })
+	// Create and sign token with only UserID
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, &Claims{
+		UserID: userID,
+	})
 
-    tokenString, err := token.SignedString(getSecret())
-    if err != nil {
-        return "", err
-    }
+	tokenString, err := token.SignedString(getSecret())
+	if err != nil {
+		return "", err
+	}
 
-    return tokenString, nil
+	return tokenString, nil
 }
 
 func GenerateTokenHandler(w http.ResponseWriter, r *http.Request) {

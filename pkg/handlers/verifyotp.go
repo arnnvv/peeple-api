@@ -115,23 +115,23 @@ func VerifyOTP(w http.ResponseWriter, r *http.Request) {
 func createOrGetUser(phoneNumber string) (uint, error) {
 	var user db.UserModel
 	result := db.DB.Where("phone_number = ?", phoneNumber).First(&user)
-	
+
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			// Create new user
 			newUser := db.UserModel{
 				PhoneNumber: &phoneNumber,
 			}
-			
+
 			if err := db.DB.Create(&newUser).Error; err != nil {
 				return 0, err
 			}
-			
+
 			return newUser.ID, nil
 		}
 		return 0, result.Error
 	}
-	
+
 	return user.ID, nil
 }
 
@@ -142,6 +142,6 @@ func generateToken(userID uint) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	return tokenString, nil
 }

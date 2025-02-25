@@ -1,12 +1,12 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net/http"
 	"time"
 	"unicode"
-	"encoding/json"
 
 	"github.com/arnnvv/peeple-api/db"
 	"github.com/arnnvv/peeple-api/pkg/utils"
@@ -100,10 +100,10 @@ func validatePhoneNumber(phoneNumber string) error {
 func generateOTP() string {
 	// Seed the random number generator
 	rand.Seed(time.Now().UnixNano())
-	
+
 	// Generate a random 6-digit number
 	otp := rand.Intn(900000) + 100000
-	
+
 	return fmt.Sprintf("%06d", otp)
 }
 
