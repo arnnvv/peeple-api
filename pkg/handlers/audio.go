@@ -64,7 +64,7 @@ func GenerateAudioPresignedURL(w http.ResponseWriter, r *http.Request) {
 	awsAccessKey := os.Getenv("AWS_ACCESS_KEY_ID")
 	awsSecretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
 	s3Bucket := os.Getenv("S3_BUCKET")
-	
+
 	if awsRegion == "" || awsAccessKey == "" || awsSecretKey == "" || s3Bucket == "" {
 		respondWithError(w, http.StatusInternalServerError,
 			"Missing AWS configuration", operation)
@@ -80,7 +80,7 @@ func GenerateAudioPresignedURL(w http.ResponseWriter, r *http.Request) {
 	// Validate audio prompt
 	audioPrompt, err := enums.ParseAudioPrompt(requestBody.Prompt)
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, 
+		respondWithError(w, http.StatusBadRequest,
 			fmt.Sprintf("Invalid audio prompt: %v", err), operation)
 		return
 	}
@@ -149,9 +149,9 @@ func createPresignedURL(svc *s3.S3, bucket, key, fileType string) (string, strin
 		return "", "", fmt.Errorf("presign error: %w", err)
 	}
 
-	return url, fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", 
-		bucket, 
-		*svc.Config.Region, 
+	return url, fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s",
+		bucket,
+		*svc.Config.Region,
 		key), nil
 }
 
