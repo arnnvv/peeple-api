@@ -25,53 +25,54 @@ func (o *OTPModel) IsExpired() bool {
 }
 
 // CreateOTP creates a new OTP entry in the database
+// CreateOTP creates a new OTP entry in the database
 func CreateOTP(phoneNumber, otpCode string, ttl time.Duration) error {
-	// Delete any existing OTP for this phone number
-	if err := DB.Where("phone_number = ?", phoneNumber).Delete(&OTPModel{}).Error; err != nil {
-		return err
-	}
+    // Delete any existing OTP for this phone number (permanently)
+    if err := DB.Unscoped().Where("phone_number = ?", phoneNumber).Delete(&OTPModel{}).Error; err != nil {
+        return err
+    }
 
-	// Create new OTP
-	otp := OTPModel{
-		PhoneNumber: phoneNumber,
-		OTPCode:     otpCode,
-		ExpiresAt:   time.Now().Add(ttl),
-	}
+    // Create new OTP
+    otp := OTPModel{
+        PhoneNumber: phoneNumber,
+        OTPCode:     otpCode,
+        ExpiresAt:   time.Now().Add(ttl),
+    }
 
-	return DB.Create(&otp).Error
+    return DB.Create(&otp).Error
 }
 
 // VerifyOTP checks if the provided OTP is valid
 func VerifyOTP(phoneNumber, otpCode string) (bool, error) {
-	var otp OTPModel
-	result := DB.Where("phone_number = ?", phoneNumber).First(&otp)
+    var otp OTPModel
+    result := DB.Where("phone_number = ?", phoneNumber).First(&otp)
 
-	if result.Error != nil {
-		if result.Error == gorm.ErrRecordNotFound {
-			return false, nil
-		}
-		return false, result.Error
-	}
+    if result.Error != nil {
+        if result.Error == gorm.ErrRecordNotFound {
+            return false, nil
+        }
+        return false, result.Error
+    }
 
-	// Check if OTP has expired
-	if otp.IsExpired() {
-		// Delete expired OTP
-		DB.Delete(&otp)
-		return false, nil
-	}
+    // Check if OTP has expired
+    if otp.IsExpired() {
+        // Delete expired OTP permanently
+        DB.Unscoped().Delete(&otp)
+        return false, nil
+    }
 
-	// Check if OTP matches
-	isValid := otp.OTPCode == otpCode
+    // Check if OTP matches
+    isValid := otp.OTPCode == otpCode
 
-	// If valid, delete the OTP
-	if isValid {
-		DB.Delete(&otp)
-	}
+    // If valid, delete the OTP permanently
+    if isValid {
+        DB.Unscoped().Delete(&otp)
+    }
 
-	return isValid, nil
+    return isValid, nil
 }
 
 // DeleteExpiredOTPs removes all expired OTPs from the database
 func DeleteExpiredOTPs() error {
-	return DB.Where("expires_at < ?", time.Now()).Delete(&OTPModel{}).Error
+    return DB.Unscoped().Where("expires_at < ?", time.Now()).Delete(&OTPModel{}).Error
 }
