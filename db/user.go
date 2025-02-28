@@ -51,26 +51,26 @@ func (cd *CustomDate) Scan(value any) error {
 // UserModel represents a user in the system
 type UserModel struct {
 	gorm.Model
-	Name             *string                      `json:"name"`
-	LastName         *string                      `json:"last_name"`
-	PhoneNumber      *string                      `json:"phone_number" gorm:"unique"`
-	DateOfBirth      CustomDate                   `json:"date_of_birth"`
-	Latitude         *float64                     `json:"latitude"`
-	Longitude        *float64                     `json:"longitude"`
-	Gender           *enums.Gender                `json:"gender" gorm:"type:text"`
-	DatingIntention  *enums.DatingIntention       `json:"dating_intention" gorm:"type:text"`
-	Height           *string                      `json:"height"`
-	Hometown         *string                      `json:"hometown"`
-	JobTitle         *string                      `json:"job_title"`
-	Education        *string                      `json:"education"`
-	ReligiousBeliefs *enums.Religion              `json:"religious_beliefs" gorm:"type:text"`
-	DrinkingHabit    *enums.DrinkingSmokingHabits `json:"drinking_habit" gorm:"type:text"`
-	SmokingHabit     *enums.DrinkingSmokingHabits `json:"smoking_habit" gorm:"type:text"`
-	MediaURLs        pq.StringArray               `json:"media_urls" gorm:"type:text[]"`
-	IsVerified       bool                         `json:"is_verified" gorm:"default:false"`
-	VerificationPic  *string                      `json:"verification_pic"`
-	Prompts          []Prompt                     `json:"prompts" gorm:"foreignKey:UserID"`
-	AudioPrompt      *AudioPromptModel            `json:"audio_prompt" gorm:"foreignKey:UserID"`
+	Name               *string                      `json:"name"`
+	LastName           *string                      `json:"last_name"`
+	PhoneNumber        *string                      `json:"phone_number" gorm:"unique"`
+	DateOfBirth        CustomDate                   `json:"date_of_birth"`
+	Latitude           *float64                     `json:"latitude"`
+	Longitude          *float64                     `json:"longitude"`
+	Gender             *enums.Gender                `json:"gender" gorm:"type:text"`
+	DatingIntention    *enums.DatingIntention       `json:"dating_intention" gorm:"type:text"`
+	Height             *string                      `json:"height"`
+	Hometown           *string                      `json:"hometown"`
+	JobTitle           *string                      `json:"job_title"`
+	Education          *string                      `json:"education"`
+	ReligiousBeliefs   *enums.Religion              `json:"religious_beliefs" gorm:"type:text"`
+	DrinkingHabit      *enums.DrinkingSmokingHabits `json:"drinking_habit" gorm:"type:text"`
+	SmokingHabit       *enums.DrinkingSmokingHabits `json:"smoking_habit" gorm:"type:text"`
+	MediaURLs          pq.StringArray               `json:"media_urls" gorm:"type:text[]"`
+	VerificationStatus *enums.VerificationStatus    `json:"verification_status" gorm:"type:text;default:'false'"`
+	VerificationPic    *string                      `json:"verification_pic"`
+	Prompts            []Prompt                     `json:"prompts" gorm:"foreignKey:UserID"`
+	AudioPrompt        *AudioPromptModel            `json:"audio_prompt" gorm:"foreignKey:UserID"`
 }
 
 func (u UserModel) String() string {
@@ -78,7 +78,7 @@ func (u UserModel) String() string {
 		"User[ID:%d Name:%v Phone:%s]",
 		u.ID,
 		u.Name,
-		u.PhoneNumber,
+		*u.PhoneNumber,
 	)
 }
 

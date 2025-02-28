@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/arnnvv/peeple-api/db"
+	"github.com/arnnvv/peeple-api/pkg/enums"
 	"github.com/arnnvv/peeple-api/pkg/token"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -93,6 +94,9 @@ func GenerateVerificationPresignedURL(w http.ResponseWriter, r *http.Request) {
 	// Store public URL in VerificationPic
 	publicURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", s3Bucket, awsRegion, key)
 	user.VerificationPic = &publicURL
+
+	pendingStatus := enums.VerificationStatusPending
+	user.VerificationStatus = &pendingStatus
 
 	if err := db.DB.Save(&user).Error; err != nil {
 		http.Error(w, "Failed to store verification URL", http.StatusInternalServerError)

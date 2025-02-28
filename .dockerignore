@@ -4,3 +4,7 @@ api
 .github
 .gitignore
 .env.example
+node_modules/
+drizzle.config.ts
+pnpm-lock.yaml
+package.json

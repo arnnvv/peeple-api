@@ -395,6 +395,33 @@ func ParseAudioPrompt(s string) (AudioPrompt, error) {
 	}
 }
 
+type VerificationStatus string
+
+const (
+	VerificationStatusFalse   VerificationStatus = "false"
+	VerificationStatusTrue    VerificationStatus = "true"
+	VerificationStatusPending VerificationStatus = "pending"
+)
+
+func (v VerificationStatus) Value() (driver.Value, error) {
+	return string(v), nil
+}
+
+func (v *VerificationStatus) Scan(value any) error {
+	if value == nil {
+		*v = VerificationStatusFalse
+		return nil
+	}
+
+	strValue, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("invalid value type for VerificationStatus: %T", value)
+	}
+
+	*v = VerificationStatus(strValue)
+	return nil
+}
+
 func (pc *PromptCategory) Scan(value any) error {
 	*pc = PromptCategory(value.(string))
 	return nil
