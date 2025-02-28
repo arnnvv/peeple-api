@@ -37,6 +37,7 @@ func main() {
 	http.HandleFunc("/get-profile", token.AuthMiddleware(handlers.ProfileHandler))
 	http.HandleFunc("/api/profile", token.AuthMiddleware(handlers.CreateProfile))
 	http.HandleFunc("/api/auth-status", token.AuthMiddleware(handlers.CheckAuthStatus))
+	http.HandleFunc("/verify", token.AuthMiddleware(handlers.GenerateVerificationPresignedURL))
 	// Add new OTP routes
 	http.HandleFunc("/api/send-otp", handlers.SendOTP)
 	http.HandleFunc("/api/verify-otp", handlers.VerifyOTP)

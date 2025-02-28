@@ -67,6 +67,8 @@ type UserModel struct {
 	DrinkingHabit    *enums.DrinkingSmokingHabits `json:"drinking_habit" gorm:"type:text"`
 	SmokingHabit     *enums.DrinkingSmokingHabits `json:"smoking_habit" gorm:"type:text"`
 	MediaURLs        pq.StringArray               `json:"media_urls" gorm:"type:text[]"`
+	IsVerified       bool                         `json:"is_verified" gorm:"default:false"`
+	VerificationPic  *string                      `json:"verification_pic"`
 	Prompts          []Prompt                     `json:"prompts" gorm:"foreignKey:UserID"`
 	AudioPrompt      *AudioPromptModel            `json:"audio_prompt" gorm:"foreignKey:UserID"`
 }
