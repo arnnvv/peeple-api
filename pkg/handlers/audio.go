@@ -35,14 +35,23 @@ type AudioUploadURL struct {
 }
 
 var allowedAudioTypes = map[string]bool{
-	"audio/mpeg":   true,
-	"audio/wav":    true,
-	"audio/ogg":    true,
-	"audio/webm":   true,
-	"audio/aac":    true,
-	"audio/x-m4a":  true,
-	"audio/x-aiff": true,
-	"audio/flac":   true,
+	"audio/mpeg":           true,
+	"audio/wav":            true,
+	"audio/ogg":            true,
+	"audio/webm":           true,
+	"audio/aac":            true,
+	"audio/x-m4a":          true,
+	"audio/x-aiff":         true,
+	"audio/flac":           true,
+	"audio/mp4":            true, // MP4 audio
+	"audio/opus":           true, // Opus audio [8][5]
+	"audio/amr":            true, // Adaptive Multi-Rate speech codec [10]
+	"audio/midi":           true, // MIDI sequences [10]
+	"audio/x-pn-realaudio": true, // RealAudio [10]
+	"audio/x-wavpack":      true, // WavPack lossless [10]
+	"audio/basic":          true, // Sun/NeXT AU files [2][10]
+	"audio/x-tta":          true, // True Audio lossless [10]
+	"audio/x-ms-asf":       true, // Legacy ASF audio [3]
 }
 
 func GenerateAudioPresignedURL(w http.ResponseWriter, r *http.Request) {
