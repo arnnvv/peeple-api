@@ -24,7 +24,7 @@ import (
 type AudioFileRequest struct {
 	Filename string `json:"filename"`
 	Type     string `json:"type"`
-	Prompt   string `json:"prompt"` // Added prompt field
+	Prompt   string `json:"prompt"`
 }
 
 type AudioUploadURL struct {
@@ -173,7 +173,7 @@ func handleDatabaseOperations(ctx context.Context, userID uint, audioURL string,
 
 	// Upsert operation
 	var existing db.AudioPromptModel
-	if err := tx.Where("user_id = ? AND prompt = ?", userID, prompt).First(&existing).Error; err != nil {
+	if err := tx.Where("user_id = ?", userID).First(&existing).Error; err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return fmt.Errorf("database lookup failed: %w", err)
 		}
