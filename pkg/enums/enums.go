@@ -422,6 +422,43 @@ func (v *VerificationStatus) Scan(value any) error {
 	return nil
 }
 
+// UserRole enum
+type UserRole string
+
+const (
+    UserRoleUser  UserRole = "user"
+    UserRoleAdmin UserRole = "admin"
+)
+
+func ParseUserRole(s string) (UserRole, error) {
+    switch s {
+    case "user":
+        return UserRoleUser, nil
+    case "admin":
+        return UserRoleAdmin, nil
+    default:
+        return "", fmt.Errorf("invalid UserRole value: %s", s)
+    }
+}
+
+func (u *UserRole) Scan(value any) error {
+    if value == nil {
+        *u = UserRoleUser
+        return nil
+    }
+
+    strValue, ok := value.(string)
+    if !ok {
+        return fmt.Errorf("invalid value type for UserRole: %T", value)
+    }
+
+    *u = UserRole(strValue)
+    return nil
+}
+
+func (u UserRole) Value() (driver.Value, error) {
+    return string(u), nil
+}
 func (pc *PromptCategory) Scan(value any) error {
 	*pc = PromptCategory(value.(string))
 	return nil
