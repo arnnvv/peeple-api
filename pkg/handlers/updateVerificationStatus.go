@@ -1,4 +1,3 @@
-
 package handlers
 
 import (
@@ -11,8 +10,8 @@ import (
 
 // VerificationActionRequest represents the request body for approving/rejecting a verification
 type VerificationActionRequest struct {
-	UserID  uint   `json:"user_id"`
-	Approve bool   `json:"approve"` // true = approve, false = reject
+	UserID  uint `json:"user_id"`
+	Approve bool `json:"approve"` // true = approve, false = reject
 }
 
 // UpdateVerificationStatusHandler handles the approval or rejection of user verification

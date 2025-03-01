@@ -41,13 +41,13 @@ func main() {
 	// Add new OTP routes
 	http.HandleFunc("/api/send-otp", handlers.SendOTP)
 	http.HandleFunc("/api/verify-otp", handlers.VerifyOTP)
-// Add the SSE endpoint for admins with the new middleware
-http.HandleFunc("/api/admin/events", token.AdminAuthMiddleware(handlers.AdminEventsHandler))
-http.HandleFunc("/api/set-admin", token.AdminAuthMiddleware(handlers.SetAdminHandler))
-// Add the endpoint for getting pending verifications
-http.HandleFunc("/api/admin/verifications", token.AdminAuthMiddleware(handlers.GetPendingVerificationsHandler))
-// Add the endpoint for updating verification status
-http.HandleFunc("/api/admin/verify", token.AdminAuthMiddleware(handlers.UpdateVerificationStatusHandler))
+	// Add the SSE endpoint for admins with the new middleware
+	http.HandleFunc("/api/admin/events", token.AdminAuthMiddleware(handlers.AdminEventsHandler))
+	http.HandleFunc("/api/set-admin", token.AdminAuthMiddleware(handlers.SetAdminHandler))
+	// Add the endpoint for getting pending verifications
+	http.HandleFunc("/api/admin/verifications", token.AdminAuthMiddleware(handlers.GetPendingVerificationsHandler))
+	// Add the endpoint for updating verification status
+	http.HandleFunc("/api/admin/verify", token.AdminAuthMiddleware(handlers.UpdateVerificationStatusHandler))
 
 	// Start a goroutine to periodically clean up expired OTPs
 	go cleanupExpiredOTPs()

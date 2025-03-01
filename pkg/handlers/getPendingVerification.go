@@ -1,4 +1,3 @@
-
 package handlers
 
 import (
@@ -70,8 +69,8 @@ func GetPendingVerificationsHandler(w http.ResponseWriter, r *http.Request) {
 	// Return the response
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":      true,
+		"success":               true,
 		"verification_requests": verificationRequests,
-		"count":        len(verificationRequests),
+		"count":                 len(verificationRequests),
 	})
 }
