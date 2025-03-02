@@ -2,8 +2,7 @@ name: Deploy to EC2
 
 on:
   push:
-    branches:
-      - master
+    branches: [master]
 
 jobs:
   deploy:
@@ -22,7 +21,7 @@ jobs:
         run: |
           echo "${{ secrets.GHCR_TOKEN }}" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
 
-      - name: Build and push image with Podman
+      - name: Build and push image
         run: |
           podman build -t ghcr.io/${{ github.repository }}:latest .
           podman push ghcr.io/${{ github.repository }}:latest
@@ -35,18 +34,24 @@ jobs:
           ENV_FILE: ${{ secrets.ENV_FILE_CONTENTS }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
         run: |
-          echo "$EC2_SSH_KEY" > ec2_key
-          chmod 700 ec2_key
-
-          ssh -i ec2_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $EC2_USER@$EC2_HOST << 'EOF'
-            echo "$ENV_FILE" > .env
-            
-            echo "$GHCR_TOKEN" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
-            
-            podman pull ghcr.io/${{ github.repository }}:latest
-            
-            podman stop peeple || true
-            podman rm peeple || true
-            
-            podman run -d --restart=always -p 8080:8080 --env-file ./.env --name peeple ghcr.io/${{ github.repository }}:latest
+          # Format SSH key properly
+          echo "$EC2_SSH_KEY" | sed 's/\\n/\n/g' > ec2_key
+          chmod 600 ec2_key
+          
+          # Verify SSH connection
+          ssh -i ec2_key -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST "echo 'SSH connection successful!'"
+          
+          # Execute deployment
+          ssh -i ec2_key -T -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST /bin/bash <<EOF
+          echo "$ENV_FILE" > .env
+          echo "$GHCR_TOKEN" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
+          podman pull ghcr.io/${{ github.repository }}:latest
+          podman stop peeple || true
+          podman rm peeple || true
+          podman run -d \
+            --restart=always \
+            -p 8080:8080 \
+            --env-file ./.env \
+            --name peeple \
+            ghcr.io/${{ github.repository }}:latest
           EOF
