@@ -26,30 +26,34 @@ jobs:
           podman build -t ghcr.io/${{ github.repository }}:latest .
           podman push ghcr.io/${{ github.repository }}:latest
 
+      - name: Setup SSH key
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$EC2_SSH_KEY" > ~/.ssh/ec2_key
+          chmod 600 ~/.ssh/ec2_key
+          ssh-keygen -y -f ~/.ssh/ec2_key > /dev/null || (echo "Invalid private key format" && exit 1)
+
       - name: Deploy to EC2
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
-          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
           ENV_FILE: ${{ secrets.ENV_FILE_CONTENTS }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
         run: |
-          # Format SSH key properly
-          echo "$EC2_SSH_KEY" | sed 's/\\n/\n/g' > ec2_key
-          chmod 600 ec2_key
+          ssh -i ~/.ssh/ec2_key -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST "echo 'SSH connection successful!'"
 
-          ssh -i ec2_key -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST "echo 'SSH connection successful!'"
-
-          ssh -i ec2_key -T -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST /bin/bash <<EOF
-          echo "$ENV_FILE" > .env
-          echo "$GHCR_TOKEN" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
-          podman pull ghcr.io/${{ github.repository }}:latest
-          podman stop peeple || true
-          podman rm peeple || true
-          podman run -d \
-            --restart=always \
-            -p 8080:8080 \
-            --env-file ./.env \
-            --name peeple \
-            ghcr.io/${{ github.repository }}:latest
+          ssh -i ~/.ssh/ec2_key -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST /bin/bash <<EOF
+            echo "$ENV_FILE" > .env
+            echo "$GHCR_TOKEN" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
+            podman pull ghcr.io/${{ github.repository }}:latest
+            podman stop peeple || true
+            podman rm peeple || true
+            podman run -d \
+              --restart=always \
+              -p 8080:8080 \
+              --env-file ./.env \
+              --name peeple \
+              ghcr.io/${{ github.repository }}:latest
           EOF
