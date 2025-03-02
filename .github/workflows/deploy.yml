@@ -37,11 +37,9 @@ jobs:
           # Format SSH key properly
           echo "$EC2_SSH_KEY" | sed 's/\\n/\n/g' > ec2_key
           chmod 600 ec2_key
-          
-          # Verify SSH connection
+
           ssh -i ec2_key -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST "echo 'SSH connection successful!'"
-          
-          # Execute deployment
+
           ssh -i ec2_key -T -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST /bin/bash <<EOF
           echo "$ENV_FILE" > .env
           echo "$GHCR_TOKEN" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
