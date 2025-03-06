@@ -19,12 +19,14 @@ import (
 )
 
 func GenerateVerificationPresignedURL(w http.ResponseWriter, r *http.Request) {
+	authHeader := r.Header.Get("Authorization")
+	targetURL := os.Getenv("TARGET_URL")
+
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Authentication and user lookup remains the same
 	claims, ok := r.Context().Value(token.ClaimsContextKey).(*token.Claims)
 	if !ok || claims == nil {
 		http.Error(w, "Invalid authentication", http.StatusUnauthorized)
@@ -37,7 +39,6 @@ func GenerateVerificationPresignedURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// AWS config check remains the same
 	awsRegion := os.Getenv("AWS_REGION")
 	awsAccessKey := os.Getenv("AWS_ACCESS_KEY_ID")
 	awsSecretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
@@ -47,14 +48,12 @@ func GenerateVerificationPresignedURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Request body parsing
 	var fileReq FileRequest
 	if err := json.NewDecoder(r.Body).Decode(&fileReq); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	// Validation
 	if fileReq.Filename == "" || fileReq.Type == "" {
 		http.Error(w, "Filename and type are required", http.StatusBadRequest)
 		return
@@ -65,14 +64,12 @@ func GenerateVerificationPresignedURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate S3 key with user ID and timestamp
 	timestamp := time.Now().Format("20060102-150405")
 	key := fmt.Sprintf("verification/%d/%s-%s",
 		claims.UserID,
 		timestamp,
 		sanitizeFilename(fileReq.Filename))
 
-	// Generate presigned URL
 	sess := session.Must(session.NewSession(&aws.Config{
 		Region:      aws.String(awsRegion),
 		Credentials: credentials.NewStaticCredentials(awsAccessKey, awsSecretKey, ""),
@@ -91,9 +88,28 @@ func GenerateVerificationPresignedURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Store public URL in VerificationPic
 	publicURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", s3Bucket, awsRegion, key)
 	user.VerificationPic = &publicURL
+
+	if targetURL != "" {
+		req, err := http.NewRequest(http.MethodGet, targetURL, nil)
+		if err != nil {
+			fmt.Printf("Error creating webhook request: %v\n", err)
+		} else {
+			req.Header.Set("Authorization", authHeader)
+
+			client := &http.Client{Timeout: 10 * time.Second}
+			resp, err := client.Do(req)
+			if err != nil {
+				fmt.Printf("Error sending verification webhook: %v\n", err)
+			} else {
+				defer resp.Body.Close()
+				if resp.StatusCode != http.StatusOK {
+					fmt.Printf("Webhook returned non-200 status: %d\n", resp.StatusCode)
+				}
+			}
+		}
+	}
 
 	pendingStatus := enums.VerificationStatusPending
 	user.VerificationStatus = &pendingStatus
@@ -103,22 +119,16 @@ func GenerateVerificationPresignedURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Broadcast minimal ping notification to admin clients
-	BroadcastVerificationEvent(user.ID, publicURL, string(pendingStatus))
-
-	// Return only the presigned URL
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"upload_url": presignedURL,
 	})
 }
 
-// Helper to sanitize filenames
 func sanitizeFilename(filename string) string {
 	return strings.ReplaceAll(filepath.Base(filename), " ", "_")
 }
 
-// Helper function to check for image types only
 func isImageType(mimeType string) bool {
 	imageTypes := map[string]bool{
 		"image/jpeg":    true,

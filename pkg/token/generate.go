@@ -29,9 +29,7 @@ func getSecret() []byte {
 	return jwtSecret
 }
 
-// GenerateToken creates a new JWT token for a user ID
 func GenerateToken(userID uint) (string, error) {
-	// Create and sign token with only UserID
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, &Claims{
 		UserID: userID,
 	})
@@ -89,7 +87,6 @@ func GenerateTokenHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Find user by phone number to get UserID
 	var user db.UserModel
 	result := db.DB.Where("phone_number = ?", phone).First(&user)
 	if result.Error != nil {
@@ -109,7 +106,6 @@ func GenerateTokenHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create and sign token with only UserID
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, &Claims{
 		UserID: user.ID,
 	})
@@ -124,7 +120,6 @@ func GenerateTokenHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return successful response
 	json.NewEncoder(w).Encode(TokenResponse{
 		Success: true,
 		Message: tokenString,
