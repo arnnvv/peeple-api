@@ -63,13 +63,9 @@ func UpdateVerificationStatusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Broadcast an event to notify verification status change
-	// This helps keep admin UI updated in real-time
-	BroadcastVerificationEvent(user.ID, *user.VerificationPic, string(newStatus))
-
 	// Return success response
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	json.NewEncoder(w).Encode(map[string]any{
 		"success": true,
 		"message": "Verification status updated successfully",
 		"user_id": user.ID,
