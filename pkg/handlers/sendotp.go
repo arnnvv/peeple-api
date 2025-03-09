@@ -12,22 +12,18 @@ import (
 	"github.com/arnnvv/peeple-api/pkg/utils"
 )
 
-// SendOTPRequest represents the request to send an OTP
 type SendOTPRequest struct {
 	PhoneNumber string `json:"phoneNumber"`
 }
 
-// SendOTPResponse represents the response from sending an OTP
 type SendOTPResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 }
 
-// SendOTP handles the request to send an OTP
 func SendOTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	// Only allow POST method
 	if r.Method != http.MethodPost {
 		utils.RespondWithJSON(w, http.StatusMethodNotAllowed, SendOTPResponse{
 			Success: false,
@@ -36,7 +32,6 @@ func SendOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse request body
 	var req SendOTPRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		utils.RespondWithJSON(w, http.StatusBadRequest, SendOTPResponse{
@@ -46,7 +41,6 @@ func SendOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate phone number
 	if err := validatePhoneNumber(req.PhoneNumber); err != nil {
 		utils.RespondWithJSON(w, http.StatusBadRequest, SendOTPResponse{
 			Success: false,
@@ -55,10 +49,8 @@ func SendOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate a random 6-digit OTP
 	otpCode := generateOTP()
 
-	// Store OTP in database with 3-minute TTL
 	if err := db.CreateOTP(req.PhoneNumber, otpCode, 3*time.Minute); err != nil {
 		utils.RespondWithJSON(w, http.StatusInternalServerError, SendOTPResponse{
 			Success: false,
@@ -67,17 +59,14 @@ func SendOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Send OTP via SMS (placeholder function)
 	sendOTPViaSMS(req.PhoneNumber, otpCode)
 
-	// Return success response
 	utils.RespondWithJSON(w, http.StatusOK, SendOTPResponse{
 		Success: true,
 		Message: "OTP sent successfully",
 	})
 }
 
-// validatePhoneNumber validates the phone number format
 func validatePhoneNumber(phoneNumber string) error {
 	if phoneNumber == "" {
 		return fmt.Errorf("phone number is required")
@@ -96,20 +85,14 @@ func validatePhoneNumber(phoneNumber string) error {
 	return nil
 }
 
-// generateOTP generates a random 6-digit OTP
 func generateOTP() string {
-	// Seed the random number generator
 	rand.Seed(time.Now().UnixNano())
 
-	// Generate a random 6-digit number
 	otp := rand.Intn(900000) + 100000
 
 	return fmt.Sprintf("%06d", otp)
 }
 
-// sendOTPViaSMS is a placeholder function for sending OTP via SMS
 func sendOTPViaSMS(phoneNumber, otpCode string) {
-	// This is a placeholder function
-	// Implementation will be added later
 	fmt.Printf("Sending OTP %s to %s\n", otpCode, phoneNumber)
 }

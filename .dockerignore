@@ -1,10 +1,10 @@
 api
 .env
-.git
+.git/
 .github
 .gitignore
 .env.example
-node_modules/
-drizzle.config.ts
-pnpm-lock.yaml
 package.json
+node_modules/
+pnpm-lock.yaml
+drizzle.config.ts

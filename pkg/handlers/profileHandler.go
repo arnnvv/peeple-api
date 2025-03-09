@@ -19,14 +19,12 @@ func ProfileHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	resp := ProfileResponse{Success: true}
 
-	// Get claims from context
 	claims, ok := r.Context().Value(token.ClaimsContextKey).(*token.Claims)
 	if !ok || claims == nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	// Fetch user with relationships
 	var user db.UserModel
 	err := db.DB.
 		Preload("Prompts").

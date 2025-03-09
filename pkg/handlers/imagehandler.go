@@ -52,14 +52,12 @@ func GeneratePresignedURLs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get claims from middleware context
 	claims, ok := r.Context().Value(token.ClaimsContextKey).(*token.Claims)
 	if !ok || claims == nil {
 		http.Error(w, "Invalid authentication", http.StatusUnauthorized)
 		return
 	}
 
-	// Get user from database using UserID
 	var user db.UserModel
 	result := db.DB.Where("id = ?", claims.UserID).First(&user)
 	if result.Error != nil {
@@ -67,14 +65,12 @@ func GeneratePresignedURLs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Clear existing media URLs
 	user.MediaURLs = []string{}
 	if err := db.DB.Save(&user).Error; err != nil {
 		http.Error(w, "Failed to clear existing media URLs", http.StatusInternalServerError)
 		return
 	}
 
-	// AWS Configuration
 	awsRegion := os.Getenv("AWS_REGION")
 	awsAccessKey := os.Getenv("AWS_ACCESS_KEY_ID")
 	awsSecretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
@@ -85,7 +81,6 @@ func GeneratePresignedURLs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Decode request body
 	var requestBody struct {
 		Files []FileRequest `json:"files"`
 	}
@@ -95,7 +90,6 @@ func GeneratePresignedURLs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate file count
 	fileCount := len(requestBody.Files)
 	if fileCount < 3 {
 		http.Error(w, "Requires minimum 3 files", http.StatusBadRequest)
@@ -106,7 +100,6 @@ func GeneratePresignedURLs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create AWS session
 	sess := session.Must(session.NewSession(&aws.Config{
 		Region:      aws.String(awsRegion),
 		Credentials: credentials.NewStaticCredentials(awsAccessKey, awsSecretKey, ""),
@@ -127,7 +120,6 @@ func GeneratePresignedURLs(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Create S3 key for the file
 		key := fmt.Sprintf("uploads/%s/%s", datePrefix, file.Filename)
 
 		req, _ := svc.PutObjectRequest(&s3.PutObjectInput{
@@ -148,20 +140,16 @@ func GeneratePresignedURLs(w http.ResponseWriter, r *http.Request) {
 			URL:      url,
 		})
 
-		// Form the permanent (public) URL to be stored in the database.
-		// Adjust the URL format based on your S3 configuration or CloudFront setup.
 		publicURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", s3Bucket, awsRegion, key)
 		permanentURLs = append(permanentURLs, publicURL)
 	}
 
-	// Update the user's media URLs with the permanent links
 	user.MediaURLs = permanentURLs
 	if err := db.DB.Save(&user).Error; err != nil {
 		http.Error(w, "Failed to store media URLs in database", http.StatusInternalServerError)
 		return
 	}
 
-	// Respond with the presigned upload URLs for the client to use
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string][]UploadURL{
 		"uploads": uploadURLs,

@@ -48,8 +48,6 @@ func (cd *CustomDate) Scan(value any) error {
 	}
 }
 
-// UserModel represents a user in the system
-// UserModel represents a user in the system
 type UserModel struct {
 	gorm.Model
 	Name               *string                      `json:"name"`
@@ -84,12 +82,10 @@ func (u UserModel) String() string {
 	)
 }
 
-// TableName specifies the table name for UserModel
 func (UserModel) TableName() string {
 	return "users"
 }
 
-// Replace the logDatabaseAction function with:
 func logDatabaseAction(tx *gorm.DB) {
 	fmt.Printf("[DB Operation] SQL: %s\nParams: %+v\n",
 		tx.Statement.SQL.String(),
@@ -97,7 +93,6 @@ func logDatabaseAction(tx *gorm.DB) {
 	)
 }
 
-// Keep the BeforeSave hook as:
 func (u *UserModel) BeforeSave(tx *gorm.DB) error {
 	fmt.Printf("[DB Hook] BeforeSave - PhoneNumber: %v\n", u.PhoneNumber)
 	if u.PhoneNumber == nil || *u.PhoneNumber == "" {
@@ -107,11 +102,8 @@ func (u *UserModel) BeforeSave(tx *gorm.DB) error {
 	return nil
 }
 
-// Scan implementations for enum types
-// Custom GORM type for string array
 type StringArray []string
 
-// Scan implements the sql.Scanner interface for StringArray
 func (sa *StringArray) Scan(value any) error {
 	if value == nil {
 		*sa = nil
@@ -127,7 +119,6 @@ func (sa *StringArray) Scan(value any) error {
 	}
 }
 
-// Value implements the driver.Valuer interface for StringArray
 func (sa StringArray) Value() (driver.Value, error) {
 	if sa == nil {
 		return nil, nil
@@ -135,7 +126,6 @@ func (sa StringArray) Value() (driver.Value, error) {
 	return json.Marshal(sa)
 }
 
-// AutoMigrate creates or updates the database schema
 func AutoMigrate(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&UserModel{},

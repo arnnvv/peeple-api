@@ -18,8 +18,7 @@ func ProtectedHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build the JSON response with only UserID
-	response := map[string]interface{}{
+	response := map[string]any{
 		"user_id": claims.UserID,
 	}
 

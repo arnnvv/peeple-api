@@ -43,15 +43,15 @@ var allowedAudioTypes = map[string]bool{
 	"audio/x-m4a":          true,
 	"audio/x-aiff":         true,
 	"audio/flac":           true,
-	"audio/mp4":            true, // MP4 audio
-	"audio/opus":           true, // Opus audio [8][5]
-	"audio/amr":            true, // Adaptive Multi-Rate speech codec [10]
-	"audio/midi":           true, // MIDI sequences [10]
-	"audio/x-pn-realaudio": true, // RealAudio [10]
-	"audio/x-wavpack":      true, // WavPack lossless [10]
-	"audio/basic":          true, // Sun/NeXT AU files [2][10]
-	"audio/x-tta":          true, // True Audio lossless [10]
-	"audio/x-ms-asf":       true, // Legacy ASF audio [3]
+	"audio/mp4":            true,
+	"audio/opus":           true,
+	"audio/amr":            true,
+	"audio/midi":           true,
+	"audio/x-pn-realaudio": true,
+	"audio/x-wavpack":      true,
+	"audio/basic":          true,
+	"audio/x-tta":          true,
+	"audio/x-ms-asf":       true,
 }
 
 func GenerateAudioPresignedURL(w http.ResponseWriter, r *http.Request) {
@@ -68,7 +68,6 @@ func GenerateAudioPresignedURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate AWS configuration
 	awsRegion := os.Getenv("AWS_REGION")
 	awsAccessKey := os.Getenv("AWS_ACCESS_KEY_ID")
 	awsSecretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
@@ -86,7 +85,6 @@ func GenerateAudioPresignedURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate audio prompt
 	audioPrompt, err := enums.ParseAudioPrompt(requestBody.Prompt)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest,
@@ -100,7 +98,6 @@ func GenerateAudioPresignedURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Initialize AWS session
 	sess, err := session.NewSession(&aws.Config{
 		Region:      aws.String(awsRegion),
 		Credentials: credentials.NewStaticCredentials(awsAccessKey, awsSecretKey, ""),
@@ -121,7 +118,6 @@ func GenerateAudioPresignedURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Database operation
 	if err := handleDatabaseOperations(r.Context(), claims.UserID, permanentURL, audioPrompt); err != nil {
 		respondWithError(w, http.StatusInternalServerError,
 			err.Error(), operation)
@@ -171,7 +167,6 @@ func handleDatabaseOperations(ctx context.Context, userID uint, audioURL string,
 	}
 	defer tx.Rollback()
 
-	// Upsert operation
 	var existing db.AudioPromptModel
 	if err := tx.Where("user_id = ?", userID).First(&existing).Error; err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {

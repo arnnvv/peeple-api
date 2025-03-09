@@ -32,7 +32,6 @@ func ParseGender(s string) (Gender, error) {
 	}
 }
 
-// DatingIntention enum
 type DatingIntention string
 
 const (
@@ -63,7 +62,6 @@ func ParseDatingIntention(s string) (DatingIntention, error) {
 	}
 }
 
-// Religion enum
 type Religion string
 
 const (
@@ -109,7 +107,6 @@ func ParseReligion(s string) (Religion, error) {
 	}
 }
 
-// DrinkingSmokingHabits enum
 type DrinkingSmokingHabits string
 
 const (
@@ -131,7 +128,6 @@ func ParseDrinkingSmokingHabits(s string) (DrinkingSmokingHabits, error) {
 	}
 }
 
-// PromptCategory enum
 type PromptCategory string
 
 const (
@@ -156,7 +152,6 @@ func ParsePromptCategory(s string) (PromptCategory, error) {
 	}
 }
 
-// PromptType enum
 type PromptType string
 
 const (
@@ -274,7 +269,6 @@ func ParsePromptType(s string) (PromptType, error) {
 	}
 }
 
-// AudioPrompt enum
 type AudioPrompt string
 
 const (
@@ -422,7 +416,6 @@ func (v *VerificationStatus) Scan(value any) error {
 	return nil
 }
 
-// UserRole enum
 type UserRole string
 
 const (
@@ -472,7 +465,6 @@ func (pc PromptCategory) Value() (driver.Value, error) {
 	return string(pc), nil
 }
 
-// Add to AudioPrompt
 func (ap *AudioPrompt) Scan(value any) error {
 	*ap = AudioPrompt(value.(string))
 	return nil
@@ -491,7 +483,6 @@ func (g Gender) Value() (driver.Value, error) {
 	return string(g), nil
 }
 
-// DatingIntention methods
 func (d *DatingIntention) Scan(value any) error {
 	*d = DatingIntention(value.(string))
 	return nil
@@ -501,7 +492,6 @@ func (d DatingIntention) Value() (driver.Value, error) {
 	return string(d), nil
 }
 
-// Religion methods
 func (r *Religion) Scan(value any) error {
 	*r = Religion(value.(string))
 	return nil
@@ -511,7 +501,6 @@ func (r Religion) Value() (driver.Value, error) {
 	return string(r), nil
 }
 
-// DrinkingSmokingHabits methods
 func (h *DrinkingSmokingHabits) Scan(value any) error {
 	*h = DrinkingSmokingHabits(value.(string))
 	return nil

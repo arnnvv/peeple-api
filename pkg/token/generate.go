@@ -45,7 +45,6 @@ func GenerateToken(userID uint) (string, error) {
 func GenerateTokenHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	// Validate HTTP method
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		json.NewEncoder(w).Encode(TokenResponse{
@@ -55,7 +54,6 @@ func GenerateTokenHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get phone number from query params
 	phone := r.URL.Query().Get("phone")
 	if phone == "" {
 		w.WriteHeader(http.StatusBadRequest)
@@ -66,7 +64,6 @@ func GenerateTokenHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate phone number format
 	if len(phone) != 10 {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(TokenResponse{

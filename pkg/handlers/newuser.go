@@ -70,9 +70,8 @@ func CreateNewUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Check for existing phone number using First()
 	var existingUser db.UserModel
-	phoneNumber := req.PhoneNumber // Create variable to get address
+	phoneNumber := req.PhoneNumber
 	result := db.DB.Where("phone_number = ?", &phoneNumber).First(&existingUser)
 	if result.Error == nil {
 		w.WriteHeader(http.StatusConflict)
@@ -91,7 +90,7 @@ func CreateNewUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	newUser := db.UserModel{
-		PhoneNumber: &phoneNumber, // Use address of phoneNumber
+		PhoneNumber: &phoneNumber,
 	}
 
 	createResult := db.DB.Create(&newUser)

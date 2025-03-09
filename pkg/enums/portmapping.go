@@ -60,7 +60,6 @@ func (pc PromptCategory) GetPrompts() []PromptType {
 	}
 }
 
-// GetCategory returns the PromptCategory for a given PromptType
 func (pt PromptType) GetCategory() PromptCategory {
 	for _, category := range []PromptCategory{
 		PromptCategoryStoryTime,
@@ -73,5 +72,5 @@ func (pt PromptType) GetCategory() PromptCategory {
 			return category
 		}
 	}
-	return PromptCategoryStoryTime // Default category if not found
+	return PromptCategoryStoryTime
 }
