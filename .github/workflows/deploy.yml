@@ -31,7 +31,7 @@ jobs:
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "$EC2_SSH_KEY" > ~/.ssh/ec2_key
+          echo "${EC2_SSH_KEY}" | tr -d '\r' > ~/.ssh/ec2_key
           chmod 600 ~/.ssh/ec2_key
           ssh-keygen -y -f ~/.ssh/ec2_key > /dev/null || (echo "Invalid private key format" && exit 1)
 
@@ -42,11 +42,11 @@ jobs:
           ENV_FILE: ${{ secrets.ENV_FILE_CONTENTS }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
         run: |
-          ssh -i ~/.ssh/ec2_key -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST "echo 'SSH connection successful!'"
+          ssh -i ~/.ssh/ec2_key -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} "echo 'SSH connection successful!'"
 
-          ssh -i ~/.ssh/ec2_key -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST /bin/bash <<EOF
-            echo "$ENV_FILE" > .env
-            echo "$GHCR_TOKEN" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
+          ssh -i ~/.ssh/ec2_key -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} /bin/bash <<EOF
+            echo "${ENV_FILE}" > .env
+            echo "${GHCR_TOKEN}" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
             podman pull ghcr.io/${{ github.repository }}:latest
             podman stop peeple || true
             podman rm peeple || true
