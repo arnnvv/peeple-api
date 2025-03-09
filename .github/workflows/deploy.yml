@@ -50,6 +50,9 @@ jobs:
             podman pull ghcr.io/${{ github.repository }}:latest
             podman stop peeple || true
             podman rm peeple || true
+
+            sudo fuser -k 8080/tcp || true
+
             podman run -d \
               --restart=always \
               -p 8080:8080 \
