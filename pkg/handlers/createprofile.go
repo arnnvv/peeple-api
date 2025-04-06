@@ -97,13 +97,20 @@ func CreateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Printf("[Existing User] Found User ID: %d\n", userID)
 
+	var genderParam migrations.NullGenderEnum
+	if reqData.Gender != nil {
+		genderParam = migrations.NullGenderEnum{GenderEnum: *reqData.Gender, Valid: true}
+	} else {
+		genderParam = migrations.NullGenderEnum{Valid: false}
+	}
+
 	updateParams := migrations.UpdateUserProfileParams{
 		ID:               userID,
 		Name:             pgtype.Text{String: *reqData.Name, Valid: reqData.Name != nil && *reqData.Name != ""},
 		LastName:         pgtype.Text{String: *reqData.LastName, Valid: reqData.LastName != nil},
 		Latitude:         pgtype.Float8{Float64: *reqData.Latitude, Valid: reqData.Latitude != nil},
 		Longitude:        pgtype.Float8{Float64: *reqData.Longitude, Valid: reqData.Longitude != nil},
-		Gender:           *reqData.Gender,
+		Gender:           genderParam,
 		DatingIntention:  migrations.NullDatingIntention{DatingIntention: *reqData.DatingIntention, Valid: reqData.DatingIntention != nil},
 		Hometown:         pgtype.Text{String: *reqData.Hometown, Valid: reqData.Hometown != nil},
 		JobTitle:         pgtype.Text{String: *reqData.JobTitle, Valid: reqData.JobTitle != nil},
@@ -282,7 +289,7 @@ func validateProfileSqlc(params migrations.UpdateUserProfileParams, prompts []pr
 	}
 	fmt.Printf("[Validation] Height: OK (Value: %.2f inches)\n", params.Height.Float64)
 
-	if params.Gender == "" {
+	if !params.Gender.Valid {
 		return fmt.Errorf("gender is required")
 	}
 	fmt.Printf("[Validation] Gender: OK (%s)\n", params.Gender)

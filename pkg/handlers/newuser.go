@@ -127,7 +127,7 @@ func CreateNewUser(w http.ResponseWriter, r *http.Request) {
 
 	params := migrations.CreateUserMinimalParams{
 		PhoneNumber: req.PhoneNumber,
-		Gender:      migrations.GenderEnum(req.Gender),
+		Gender:      migrations.NullGenderEnum{GenderEnum: migrations.GenderEnum(req.Gender), Valid: true},
 	}
 
 	_, createErr := queries.CreateUserMinimal(ctx, params)

@@ -143,7 +143,7 @@ CREATE TABLE users (
     date_of_birth DATE,
     latitude DOUBLE PRECISION,
     longitude DOUBLE PRECISION,
-    gender gender_enum NOT NULL,
+    gender gender_enum,
     dating_intention dating_intention,
     height DOUBLE PRECISION,
     hometown TEXT,
@@ -164,7 +164,7 @@ CREATE TABLE otps (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL,
     otp_code VARCHAR(6) NOT NULL,
-    expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '1 minute'),
+    expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '2 minute'),
     CONSTRAINT fk_otps_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 

@@ -18,6 +18,14 @@ WHERE phone_number = $1 LIMIT 1;
 SELECT * FROM users
 WHERE verification_status = $1; -- $1 should be 'pending'
 
+-- name: AddPhoneNumberInUsers :one
+INSERT INTO users (
+    phone_number
+) VALUES (
+    $1
+)
+RETURNING *;
+
 -- name: CreateUserMinimal :one
 INSERT INTO users (
     phone_number, gender
@@ -83,9 +91,9 @@ LIMIT 1;
 
 -- name: CreateOTP :one
 INSERT INTO otps (
-    user_id, otp_code, expires_at
+    user_id, otp_code
 ) VALUES (
-    $1, $2, $3
+    $1, $2
 )
 RETURNING *;
 

@@ -11,6 +11,48 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addPhoneNumberInUsers = `-- name: AddPhoneNumberInUsers :one
+
+INSERT INTO users (
+    phone_number
+) VALUES (
+    $1
+)
+RETURNING id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer
+`
+
+// $1 should be 'pending'
+func (q *Queries) AddPhoneNumberInUsers(ctx context.Context, phoneNumber string) (User, error) {
+	row := q.db.QueryRow(ctx, addPhoneNumberInUsers, phoneNumber)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.Name,
+		&i.LastName,
+		&i.PhoneNumber,
+		&i.DateOfBirth,
+		&i.Latitude,
+		&i.Longitude,
+		&i.Gender,
+		&i.DatingIntention,
+		&i.Height,
+		&i.Hometown,
+		&i.JobTitle,
+		&i.Education,
+		&i.ReligiousBeliefs,
+		&i.DrinkingHabit,
+		&i.SmokingHabit,
+		&i.MediaUrls,
+		&i.VerificationStatus,
+		&i.VerificationPic,
+		&i.Role,
+		&i.AudioPromptQuestion,
+		&i.AudioPromptAnswer,
+	)
+	return i, err
+}
+
 const cleanOTP = `-- name: CleanOTP :exec
 DELETE FROM otps
 WHERE expires_at < NOW()
@@ -116,21 +158,20 @@ func (q *Queries) CreateMyTypePrompt(ctx context.Context, arg CreateMyTypePrompt
 
 const createOTP = `-- name: CreateOTP :one
 INSERT INTO otps (
-    user_id, otp_code, expires_at
+    user_id, otp_code
 ) VALUES (
-    $1, $2, $3
+    $1, $2
 )
 RETURNING id, user_id, otp_code, expires_at
 `
 
 type CreateOTPParams struct {
-	UserID    int32
-	OtpCode   string
-	ExpiresAt pgtype.Timestamptz
+	UserID  int32
+	OtpCode string
 }
 
 func (q *Queries) CreateOTP(ctx context.Context, arg CreateOTPParams) (Otp, error) {
-	row := q.db.QueryRow(ctx, createOTP, arg.UserID, arg.OtpCode, arg.ExpiresAt)
+	row := q.db.QueryRow(ctx, createOTP, arg.UserID, arg.OtpCode)
 	var i Otp
 	err := row.Scan(
 		&i.ID,
@@ -166,7 +207,6 @@ func (q *Queries) CreateStoryTimePrompt(ctx context.Context, arg CreateStoryTime
 }
 
 const createUserMinimal = `-- name: CreateUserMinimal :one
-
 INSERT INTO users (
     phone_number, gender
 ) VALUES (
@@ -177,10 +217,9 @@ RETURNING id, created_at, name, last_name, phone_number, date_of_birth, latitude
 
 type CreateUserMinimalParams struct {
 	PhoneNumber string
-	Gender      GenderEnum
+	Gender      NullGenderEnum
 }
 
-// $1 should be 'pending'
 func (q *Queries) CreateUserMinimal(ctx context.Context, arg CreateUserMinimalParams) (User, error) {
 	row := q.db.QueryRow(ctx, createUserMinimal, arg.PhoneNumber, arg.Gender)
 	var i User
@@ -621,7 +660,7 @@ type UpdateUserProfileParams struct {
 	DateOfBirth      pgtype.Date
 	Latitude         pgtype.Float8
 	Longitude        pgtype.Float8
-	Gender           GenderEnum
+	Gender           NullGenderEnum
 	DatingIntention  NullDatingIntention
 	Height           pgtype.Float8
 	Hometown         pgtype.Text

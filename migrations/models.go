@@ -597,7 +597,7 @@ type User struct {
 	DateOfBirth         pgtype.Date
 	Latitude            pgtype.Float8
 	Longitude           pgtype.Float8
-	Gender              GenderEnum
+	Gender              NullGenderEnum
 	DatingIntention     NullDatingIntention
 	Height              pgtype.Float8
 	Hometown            pgtype.Text
