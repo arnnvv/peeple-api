@@ -3,13 +3,15 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"math/rand"
 	"net/http"
-	"time"
 	"unicode"
 
-	"github.com/arnnvv/peeple-api/db"
+	"github.com/arnnvv/peeple-api/migrations"
+	"github.com/arnnvv/peeple-api/pkg/db"
 	"github.com/arnnvv/peeple-api/pkg/utils"
+	"github.com/jackc/pgx/v5"
 )
 
 type SendOTPRequest struct {
@@ -23,6 +25,8 @@ type SendOTPResponse struct {
 
 func SendOTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	ctx := r.Context()
+	queries := db.GetDB()
 
 	if r.Method != http.MethodPost {
 		utils.RespondWithJSON(w, http.StatusMethodNotAllowed, SendOTPResponse{
@@ -49,12 +53,39 @@ func SendOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	user, err := queries.GetUserByPhone(ctx, req.PhoneNumber)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			utils.RespondWithJSON(w, http.StatusNotFound, SendOTPResponse{
+				Success: false,
+				Message: "User with this phone number not found",
+			})
+		} else {
+			log.Printf("Error finding user by phone %s: %v", req.PhoneNumber, err)
+			utils.RespondWithJSON(w, http.StatusInternalServerError, SendOTPResponse{
+				Success: false,
+				Message: "Database error checking user",
+			})
+		}
+		return
+	}
+
+	// preventing accumulation if the user requests OTP multiple times.
+	queries.DeleteOTPByUser(ctx, user.ID)
+
 	otpCode := generateOTP()
 
-	if err := db.CreateOTP(req.PhoneNumber, otpCode, 3*time.Minute); err != nil {
+	otpParams := migrations.CreateOTPParams{
+		UserID:  user.ID,
+		OtpCode: otpCode,
+	}
+
+	_, err = queries.CreateOTP(ctx, otpParams)
+	if err != nil {
+		log.Printf("Error creating OTP for user %d: %v", user.ID, err)
 		utils.RespondWithJSON(w, http.StatusInternalServerError, SendOTPResponse{
 			Success: false,
-			Message: "Failed to create OTP",
+			Message: "Failed to store OTP",
 		})
 		return
 	}
@@ -86,11 +117,7 @@ func validatePhoneNumber(phoneNumber string) error {
 }
 
 func generateOTP() string {
-	rand.Seed(time.Now().UnixNano())
-
-	otp := rand.Intn(900000) + 100000
-
-	return fmt.Sprintf("%06d", otp)
+	return fmt.Sprintf("%06d", rand.Intn(1000000))
 }
 
 func sendOTPViaSMS(phoneNumber, otpCode string) {

@@ -2,16 +2,18 @@ package handlers
 
 import (
 	"encoding/json"
-	"errors"
+	"fmt"
 	"net/http"
 	"unicode"
 
-	"github.com/arnnvv/peeple-api/db"
-	"gorm.io/gorm"
+	"github.com/arnnvv/peeple-api/migrations"
+	"github.com/arnnvv/peeple-api/pkg/db"
+	"github.com/jackc/pgx/v5"
 )
 
 type createUserRequest struct {
 	PhoneNumber string `json:"phoneNumber"`
+	Gender      string `json:"gender"` // Expect "man", "woman", "gay", "lesbian", "bisexual"
 }
 
 type CreateUserResponse struct {
@@ -19,8 +21,23 @@ type CreateUserResponse struct {
 	Message string `json:"message"`
 }
 
+func isValidGender(gender string) bool {
+	switch migrations.GenderEnum(gender) {
+	case migrations.GenderEnumMan,
+		migrations.GenderEnumWoman,
+		migrations.GenderEnumGay,
+		migrations.GenderEnumLesbian,
+		migrations.GenderEnumBisexual:
+		return true
+	default:
+		return false
+	}
+}
+
 func CreateNewUser(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	ctx := r.Context()
+	queries := db.GetDB()
 
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -70,35 +87,55 @@ func CreateNewUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var existingUser db.UserModel
-	phoneNumber := req.PhoneNumber
-	result := db.DB.Where("phone_number = ?", &phoneNumber).First(&existingUser)
-	if result.Error == nil {
+	if req.Gender == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(CreateUserResponse{
+			Success: false,
+			Message: "Gender is required",
+		})
+		return
+	}
+
+	if !isValidGender(req.Gender) {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(CreateUserResponse{
+			Success: false,
+			Message: fmt.Sprintf("Invalid gender provided. Allowed values: %s, %s, %s, %s, %s",
+				migrations.GenderEnumMan, migrations.GenderEnumWoman, migrations.GenderEnumGay, migrations.GenderEnumLesbian, migrations.GenderEnumBisexual),
+		})
+		return
+	}
+
+	_, err := queries.GetUserByPhone(ctx, req.PhoneNumber)
+	if err == nil {
 		w.WriteHeader(http.StatusConflict)
 		json.NewEncoder(w).Encode(CreateUserResponse{
 			Success: false,
 			Message: "Phone number already exists",
 		})
 		return
-	} else if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+	} else if err != pgx.ErrNoRows {
+		// An unexpected database error occurred during lookup
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(CreateUserResponse{
 			Success: false,
-			Message: "Error checking user existence",
+			Message: "Database error checking user existence",
 		})
 		return
 	}
+	// If err is pgx.ErrNoRows, proceed to create user
 
-	newUser := db.UserModel{
-		PhoneNumber: &phoneNumber,
+	params := migrations.CreateUserMinimalParams{
+		PhoneNumber: req.PhoneNumber,
+		Gender:      migrations.GenderEnum(req.Gender),
 	}
 
-	createResult := db.DB.Create(&newUser)
-	if createResult.Error != nil {
+	_, createErr := queries.CreateUserMinimal(ctx, params)
+	if createErr != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(CreateUserResponse{
 			Success: false,
-			Message: "Error creating user",
+			Message: "Error creating user in database",
 		})
 		return
 	}

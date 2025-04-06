@@ -1,8 +1,6 @@
-package db
+package bak
 
 import (
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
 	"time"
 )
 

@@ -1,9 +1,7 @@
-package db
+package bak
 
 import (
 	"time"
-
-	"gorm.io/gorm"
 )
 
 type OTPModel struct {

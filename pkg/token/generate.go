@@ -1,15 +1,18 @@
 package token
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
 	"os"
 	"sync"
 	"unicode"
 
-	"github.com/arnnvv/peeple-api/db"
+	"github.com/arnnvv/peeple-api/migrations"
+	"github.com/arnnvv/peeple-api/pkg/db"
 	"github.com/golang-jwt/jwt/v5"
-	"gorm.io/gorm"
 )
 
 type TokenResponse struct {
@@ -29,10 +32,17 @@ func getSecret() []byte {
 	return jwtSecret
 }
 
-func GenerateToken(userID uint) (string, error) {
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, &Claims{
-		UserID: userID,
-	})
+func GenerateToken(userID int32) (string, error) {
+	// may add expiration time to claims when needed
+	claims := &Claims{
+		UserID: uint(userID),
+		// RegisteredClaims: jwt.RegisteredClaims{
+		//  ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)), // Example: 24h expiry
+		//  IssuedAt:  jwt.NewNumericDate(time.Now()),
+		//  NotBefore: jwt.NewNumericDate(time.Now()),
+		// },
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
 	tokenString, err := token.SignedString(getSecret())
 	if err != nil {
@@ -84,41 +94,46 @@ func GenerateTokenHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var user db.UserModel
-	result := db.DB.Where("phone_number = ?", phone).First(&user)
-	if result.Error != nil {
-		if result.Error == gorm.ErrRecordNotFound {
-			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(TokenResponse{
-				Success: false,
-				Message: "User not found",
-			})
-			return
-		}
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(TokenResponse{
-			Success: false,
-			Message: "Database error",
-		})
-		return
-	}
+	queries := db.GetDB()
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, &Claims{
-		UserID: user.ID,
-	})
+	var user migrations.User
+	var err error
 
-	tokenString, err := token.SignedString(getSecret())
+	user, err = queries.GetUserByPhone(r.Context(), phone)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// User not found for the given phone number
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(ErrorResponse{
+				Success: false,
+				Message: "User with the provided phone number not found",
+			})
+		} else {
+			log.Printf("GenerateTokenHandler: Error fetching user by phone %s: %v\n", phone, err)
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(ErrorResponse{
+				Success: false,
+				Message: "Internal server error while retrieving user data",
+			})
+		}
+		return
+	}
+
+	token, err := GenerateToken(user.ID)
+
+	if err != nil {
+		log.Printf("GenerateTokenHandler: Error generating token for user %d: %v\n", user.ID, err)
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(TokenResponse{
+		json.NewEncoder(w).Encode(ErrorResponse{
 			Success: false,
-			Message: "Token generation failed",
+			Message: "Failed to generate authentication token",
 		})
 		return
 	}
 
+	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(TokenResponse{
 		Success: true,
-		Message: tokenString,
+		Message: token,
 	})
 }

@@ -1,9 +1,4 @@
-package db
-
-import (
-	"github.com/arnnvv/peeple-api/pkg/enums"
-	"gorm.io/gorm"
-)
+package bak
 
 type Prompt struct {
 	gorm.Model

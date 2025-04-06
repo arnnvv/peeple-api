@@ -2,18 +2,30 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
-	"github.com/arnnvv/peeple-api/db"
-	"github.com/arnnvv/peeple-api/pkg/enums"
+	"github.com/arnnvv/peeple-api/migrations"
+	"github.com/arnnvv/peeple-api/pkg/db"
+	"github.com/jackc/pgx/v5"
 )
 
 type VerificationActionRequest struct {
-	UserID  uint `json:"user_id"`
-	Approve bool `json:"approve"`
+	UserID  int32 `json:"user_id"`
+	Approve bool  `json:"approve"`
 }
 
 func UpdateVerificationStatusHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	ctx := r.Context()
+	queries := db.GetDB()
+
+	// claims, ok := ctx.Value(token.ClaimsContextKey).(*token.Claims)
+	// if !ok || claims == nil || claims.Role != string(migrations.UserRoleAdmin) {
+	// 	http.Error(w, "Forbidden: Admin privileges required", http.StatusForbidden)
+	// 	return
+	// }
+
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -25,41 +37,49 @@ func UpdateVerificationStatusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.UserID == 0 {
-		http.Error(w, "user_id is required", http.StatusBadRequest)
+	if req.UserID <= 0 {
+		http.Error(w, "valid user_id is required", http.StatusBadRequest)
 		return
 	}
 
-	var user db.UserModel
-	if result := db.DB.Where("id = ?", req.UserID).First(&user); result.Error != nil {
-		http.Error(w, "User not found", http.StatusNotFound)
+	user, err := queries.GetUserByID(ctx, req.UserID)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			http.Error(w, fmt.Sprintf("User not found with ID: %d", req.UserID), http.StatusNotFound)
+		} else {
+			http.Error(w, "Database error fetching user", http.StatusInternalServerError)
+		}
 		return
 	}
 
-	if user.VerificationStatus == nil || *user.VerificationStatus != enums.VerificationStatusPending {
-		http.Error(w, "User does not have pending verification", http.StatusBadRequest)
+	if user.VerificationStatus != migrations.VerificationStatusPending {
+		http.Error(w, "User does not have a pending verification request", http.StatusBadRequest)
 		return
 	}
 
-	var newStatus enums.VerificationStatus
+	var newStatus migrations.VerificationStatus
 	if req.Approve {
-		newStatus = enums.VerificationStatusTrue
+		newStatus = migrations.VerificationStatusTrue
 	} else {
-		newStatus = enums.VerificationStatusFalse
+		newStatus = migrations.VerificationStatusFalse
 	}
 
-	user.VerificationStatus = &newStatus
+	updateParams := migrations.UpdateUserVerificationStatusParams{
+		ID:                 req.UserID,
+		VerificationStatus: newStatus,
+	}
 
-	if err := db.DB.Save(&user).Error; err != nil {
-		http.Error(w, "Failed to update verification status", http.StatusInternalServerError)
+	_, err = queries.UpdateUserVerificationStatus(ctx, updateParams)
+	if err != nil {
+		http.Error(w, "Failed to update verification status in database", http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Verification status updated successfully",
-		"user_id": user.ID,
+		"user_id": req.UserID,
 		"status":  string(newStatus),
 	})
 }

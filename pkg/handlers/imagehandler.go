@@ -8,12 +8,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/arnnvv/peeple-api/db"
+	"github.com/arnnvv/peeple-api/migrations"
+	"github.com/arnnvv/peeple-api/pkg/db"
 	"github.com/arnnvv/peeple-api/pkg/token"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/jackc/pgx/v5"
 )
 
 type FileRequest struct {
@@ -58,16 +60,24 @@ func GeneratePresignedURLs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var user db.UserModel
-	result := db.DB.Where("id = ?", claims.UserID).First(&user)
-	if result.Error != nil {
-		http.Error(w, "User not found", http.StatusNotFound)
+	userID := int32(claims.UserID)
+	ctx := r.Context()
+
+	queries := db.GetDB()
+
+	_, err := queries.GetUserByID(ctx, userID)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			http.Error(w, "User not found", http.StatusNotFound)
+		} else {
+			http.Error(w, fmt.Sprintf("Failed to retrieve user: %v", err), http.StatusInternalServerError)
+		}
 		return
 	}
 
-	user.MediaURLs = []string{}
-	if err := db.DB.Save(&user).Error; err != nil {
-		http.Error(w, "Failed to clear existing media URLs", http.StatusInternalServerError)
+	err = queries.ClearUserMediaURLs(ctx, userID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to clear existing media URLs: %v", err), http.StatusInternalServerError)
 		return
 	}
 
@@ -84,7 +94,8 @@ func GeneratePresignedURLs(w http.ResponseWriter, r *http.Request) {
 	var requestBody struct {
 		Files []FileRequest `json:"files"`
 	}
-	err := json.NewDecoder(r.Body).Decode(&requestBody)
+
+	err = json.NewDecoder(r.Body).Decode(&requestBody)
 	if err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
@@ -144,13 +155,18 @@ func GeneratePresignedURLs(w http.ResponseWriter, r *http.Request) {
 		permanentURLs = append(permanentURLs, publicURL)
 	}
 
-	user.MediaURLs = permanentURLs
-	if err := db.DB.Save(&user).Error; err != nil {
-		http.Error(w, "Failed to store media URLs in database", http.StatusInternalServerError)
+	updateParams := migrations.UpdateUserMediaURLsParams{
+		MediaUrls: permanentURLs,
+		ID:        userID,
+	}
+	err = queries.UpdateUserMediaURLs(ctx, updateParams)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to store media URLs in database: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string][]UploadURL{
 		"uploads": uploadURLs,
 	})

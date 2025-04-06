@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -11,14 +10,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/arnnvv/peeple-api/db"
-	"github.com/arnnvv/peeple-api/pkg/enums"
+	"github.com/arnnvv/peeple-api/migrations"
+	"github.com/arnnvv/peeple-api/pkg/db"
 	"github.com/arnnvv/peeple-api/pkg/token"
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
-	"gorm.io/gorm"
 )
 
 type AudioFileRequest struct {
@@ -35,38 +35,89 @@ type AudioUploadURL struct {
 }
 
 var allowedAudioTypes = map[string]bool{
-	"audio/mpeg":           true,
-	"audio/wav":            true,
-	"audio/ogg":            true,
-	"audio/webm":           true,
-	"audio/aac":            true,
-	"audio/x-m4a":          true,
-	"audio/x-aiff":         true,
-	"audio/flac":           true,
-	"audio/mp4":            true,
-	"audio/opus":           true,
-	"audio/amr":            true,
-	"audio/midi":           true,
-	"audio/x-pn-realaudio": true,
-	"audio/x-wavpack":      true,
-	"audio/basic":          true,
-	"audio/x-tta":          true,
-	"audio/x-ms-asf":       true,
+	"audio/mpeg":           true, // MP3
+	"audio/wav":            true, // WAV
+	"audio/ogg":            true, // OGG Vorbis/Opus
+	"audio/webm":           true, // WebM Audio (often Opus or Vorbis)
+	"audio/aac":            true, // AAC
+	"audio/x-m4a":          true, // M4A (often AAC) - common Apple format
+	"audio/mp4":            true, // MP4 audio (can contain AAC, ALAC, etc.)
+	"audio/flac":           true, // FLAC
+	"audio/opus":           true, // Opus
+	"audio/amr":            true, // AMR (common in mobile)
+	"audio/basic":          true, // Basic audio (.au, .snd)
+	"audio/midi":           true, // MIDI
+	"audio/x-aiff":         true, // AIFF
+	"audio/x-pn-realaudio": true, // RealAudio
+	"audio/x-tta":          true, // True Audio
+	"audio/x-wavpack":      true, // WavPack
+	"audio/x-ms-wma":       true, // WMA (use with caution, might need specific header checks)
+}
+
+var audioPromptMap map[string]migrations.AudioPrompt
+
+func init() {
+	audioPromptMap = map[string]migrations.AudioPrompt{
+		"canWeTalkAbout":                  migrations.AudioPromptCanWeTalkAbout,
+		"captionThisPhoto":                migrations.AudioPromptCaptionThisPhoto,
+		"caughtInTheAct":                  migrations.AudioPromptCaughtInTheAct,
+		"changeMyMindAbout":               migrations.AudioPromptChangeMyMindAbout,
+		"chooseOurFirstDate":              migrations.AudioPromptChooseOurFirstDate,
+		"commentIfYouveBeenHere":          migrations.AudioPromptCommentIfYouveBeenHere,
+		"cookWithMe":                      migrations.AudioPromptCookWithMe,
+		"datingMeIsLike":                  migrations.AudioPromptDatingMeIsLike,
+		"datingMeWillLookLike":            migrations.AudioPromptDatingMeWillLookLike,
+		"doYouAgreeOrDisagreeThat":        migrations.AudioPromptDoYouAgreeOrDisagreeThat,
+		"dontHateMeIfI":                   migrations.AudioPromptDontHateMeIfI,
+		"dontJudgeMe":                     migrations.AudioPromptDontJudgeMe,
+		"mondaysAmIRight":                 migrations.AudioPromptMondaysAmIRight,
+		"aBoundaryOfMineIs":               migrations.AudioPromptABoundaryOfMineIs,
+		"aDailyEssential":                 migrations.AudioPromptADailyEssential,
+		"aDreamHomeMustInclude":           migrations.AudioPromptADreamHomeMustInclude,
+		"aFavouriteMemoryOfMine":          migrations.AudioPromptAFavouriteMemoryOfMine,
+		"aFriendsReviewOfMe":              migrations.AudioPromptAFriendsReviewOfMe,
+		"aLifeGoalOfMine":                 migrations.AudioPromptALifeGoalOfMine,
+		"aQuickRantAbout":                 migrations.AudioPromptAQuickRantAbout,
+		"aRandomFactILoveIs":              migrations.AudioPromptARandomFactILoveIs,
+		"aSpecialTalentOfMine":            migrations.AudioPromptASpecialTalentOfMine,
+		"aThoughtIRecentlyHadInTheShower": migrations.AudioPromptAThoughtIRecentlyHadInTheShower,
+		"allIAskIsThatYou":                migrations.AudioPromptAllIAskIsThatYou,
+		"guessWhereThisPhotoWasTaken":     migrations.AudioPromptGuessWhereThisPhotoWasTaken,
+		"helpMeIdentifyThisPhotoBomber":   migrations.AudioPromptHelpMeIdentifyThisPhotoBomber,
+		"hiFromMeAndMyPet":                migrations.AudioPromptHiFromMeAndMyPet,
+		"howIFightTheSundayScaries":       migrations.AudioPromptHowIFightTheSundayScaries,
+		"howHistoryWillRememberMe":        migrations.AudioPromptHowHistoryWillRememberMe,
+		"howMyFriendsSeeMe":               migrations.AudioPromptHowMyFriendsSeeMe,
+		"howToPronounceMyName":            migrations.AudioPromptHowToPronounceMyName,
+		"iBeatMyBluesBy":                  migrations.AudioPromptIBeatMyBluesBy,
+		"iBetYouCant":                     migrations.AudioPromptIBetYouCant,
+		"iCanTeachYouHowTo":               migrations.AudioPromptICanTeachYouHowTo,
+		"iFeelFamousWhen":                 migrations.AudioPromptIFeelFamousWhen,
+		"iFeelMostSupportedWhen":          migrations.AudioPromptIFeelMostSupportedWhen,
+	}
+}
+
+func parseMigrationsAudioPrompt(promptStr string) (migrations.AudioPrompt, error) {
+	enumValue, ok := audioPromptMap[promptStr]
+	if !ok {
+		return "", fmt.Errorf("invalid audio prompt value: '%s'", promptStr)
+	}
+	return enumValue, nil
 }
 
 func GenerateAudioPresignedURL(w http.ResponseWriter, r *http.Request) {
-	const operation = "audio_upload"
-
+	const operation = "handlers.GenerateAudioPresignedURL"
 	if r.Method != http.MethodPost {
-		respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed", operation)
+		respondWithError(w, http.StatusMethodNotAllowed, "Method Not Allowed: Use POST", operation)
 		return
 	}
 
 	claims, ok := r.Context().Value(token.ClaimsContextKey).(*token.Claims)
-	if !ok || claims == nil {
-		respondWithError(w, http.StatusUnauthorized, "Authentication required", operation)
+	if !ok || claims == nil || claims.UserID <= 0 {
+		respondWithError(w, http.StatusUnauthorized, "Authentication required: Invalid or missing token claims", operation)
 		return
 	}
+	userID := claims.UserID
 
 	awsRegion := os.Getenv("AWS_REGION")
 	awsAccessKey := os.Getenv("AWS_ACCESS_KEY_ID")
@@ -74,27 +125,32 @@ func GenerateAudioPresignedURL(w http.ResponseWriter, r *http.Request) {
 	s3Bucket := os.Getenv("S3_BUCKET")
 
 	if awsRegion == "" || awsAccessKey == "" || awsSecretKey == "" || s3Bucket == "" {
-		respondWithError(w, http.StatusInternalServerError,
-			"Missing AWS configuration", operation)
+		log.Printf("[%s] Critical configuration error: Missing one or more AWS environment variables (REGION, ACCESS_KEY_ID, SECRET_ACCESS_KEY, S3_BUCKET)", operation)
+		respondWithError(w, http.StatusInternalServerError, "Server configuration error prevents file uploads", operation)
 		return
 	}
 
 	var requestBody AudioFileRequest
 	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
-		respondWithError(w, http.StatusBadRequest, "Invalid request format", operation)
+		log.Printf("[%s] Failed to decode request body: %v", operation, err)
+		respondWithError(w, http.StatusBadRequest, "Invalid request body format", operation)
+		return
+	}
+	defer r.Body.Close()
+
+	if requestBody.Filename == "" || requestBody.Type == "" || requestBody.Prompt == "" {
+		respondWithError(w, http.StatusBadRequest, "Missing required fields in request: filename, type, or prompt", operation)
 		return
 	}
 
-	audioPrompt, err := enums.ParseAudioPrompt(requestBody.Prompt)
+	audioPromptEnum, err := parseMigrationsAudioPrompt(requestBody.Prompt)
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest,
-			fmt.Sprintf("Invalid audio prompt: %v", err), operation)
+		respondWithError(w, http.StatusBadRequest, err.Error(), operation)
 		return
 	}
 
 	if !isValidAudioType(requestBody.Type) {
-		respondWithError(w, http.StatusBadRequest,
-			fmt.Sprintf("Unsupported audio type: %s", requestBody.Type), operation)
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Unsupported audio file type: '%s'", requestBody.Type), operation)
 		return
 	}
 
@@ -103,94 +159,92 @@ func GenerateAudioPresignedURL(w http.ResponseWriter, r *http.Request) {
 		Credentials: credentials.NewStaticCredentials(awsAccessKey, awsSecretKey, ""),
 	})
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError,
-			"Failed to initialize AWS session", operation)
+		log.Printf("[%s] Failed to initialize AWS session: %v", operation, err)
+		respondWithError(w, http.StatusInternalServerError, "Failed to connect to storage service", operation)
 		return
 	}
 
-	svc := s3.New(sess)
-	key := generateS3Key(claims.UserID, audioPrompt, requestBody.Filename)
+	s3Client := s3.New(sess)
 
-	presignedURL, permanentURL, err := createPresignedURL(svc, s3Bucket, key, requestBody.Type)
+	s3Key := generateS3Key(int32(userID), audioPromptEnum, requestBody.Filename)
+
+	presignedPutURL, permanentObjectURL, err := createPresignedURL(s3Client, s3Bucket, s3Key, requestBody.Type)
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError,
-			"Failed to generate upload URL", operation)
+		log.Printf("[%s] Failed to generate presigned URL for key '%s': %v", operation, s3Key, err)
+		respondWithError(w, http.StatusInternalServerError, "Failed to prepare file upload URL", operation)
 		return
 	}
 
-	if err := handleDatabaseOperations(r.Context(), claims.UserID, permanentURL, audioPrompt); err != nil {
-		respondWithError(w, http.StatusInternalServerError,
-			err.Error(), operation)
+	queries := db.GetDB()
+
+	err = handleDatabaseOperations(r.Context(), queries, int32(userID), permanentObjectURL, audioPromptEnum)
+	if err != nil {
+		log.Printf("[%s] Failed to update database for user %d with audio URL '%s': %v", operation, userID, permanentObjectURL, err)
+		respondWithError(w, http.StatusInternalServerError, "Failed to save audio information", operation)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(AudioUploadURL{
 		Filename: requestBody.Filename,
 		Type:     requestBody.Type,
-		URL:      presignedURL,
+		URL:      presignedPutURL,
 		Prompt:   requestBody.Prompt,
 	})
 }
 
-func generateS3Key(userID uint, prompt enums.AudioPrompt, filename string) string {
+func generateS3Key(userID int32, prompt migrations.AudioPrompt, filename string) string {
+	safeFilename := strings.ReplaceAll(filename, "/", "_")
+	promptStr := strings.ToLower(string(prompt))
+
 	return fmt.Sprintf("users/%d/audio/%s/%d-%s",
 		userID,
-		strings.ToLower(string(prompt)),
+		promptStr,
 		time.Now().UnixNano(),
-		filename,
+		safeFilename,
 	)
 }
 
-func createPresignedURL(svc *s3.S3, bucket, key, fileType string) (string, string, error) {
-	req, _ := svc.PutObjectRequest(&s3.PutObjectInput{
+func createPresignedURL(s3Client *s3.S3, bucket, key, fileType string) (string, string, error) {
+	req, _ := s3Client.PutObjectRequest(&s3.PutObjectInput{
 		Bucket:      aws.String(bucket),
 		Key:         aws.String(key),
-		ContentType: aws.String(fileType),
+		ContentType: aws.String(fileType), // Content-Type for the uploaded object.
+		// ACL: aws.String("private"), // Default ACL is private. Set "public-read" if needed.
 	})
 
-	url, err := req.Presign(15 * time.Minute)
+	presignDuration := 15 * time.Minute
+	presignedURL, err := req.Presign(presignDuration)
 	if err != nil {
-		return "", "", fmt.Errorf("presign error: %w", err)
+		return "", "", fmt.Errorf("failed to presign request for key '%s': %w", key, err)
 	}
 
-	return url, fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s",
+	region := aws.StringValue(s3Client.Config.Region)
+	permanentURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s",
 		bucket,
-		*svc.Config.Region,
-		key), nil
+		region,
+		key)
+
+	return presignedURL, permanentURL, nil
 }
 
-func handleDatabaseOperations(ctx context.Context, userID uint, audioURL string, prompt enums.AudioPrompt) error {
-	tx := db.DB.WithContext(ctx).Begin()
-	if tx.Error != nil {
-		return fmt.Errorf("transaction begin failed: %w", tx.Error)
-	}
-	defer tx.Rollback()
-
-	var existing db.AudioPromptModel
-	if err := tx.Where("user_id = ?", userID).First(&existing).Error; err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("database lookup failed: %w", err)
-		}
-	}
-
-	if existing.ID != 0 {
-		if err := tx.Model(&existing).Update("audio_url", audioURL).Error; err != nil {
-			return fmt.Errorf("update failed: %w", err)
-		}
-	} else {
-		newPrompt := db.AudioPromptModel{
-			UserID:   userID,
-			AudioURL: audioURL,
-			Prompt:   prompt,
-		}
-		if err := tx.Create(&newPrompt).Error; err != nil {
-			return fmt.Errorf("create failed: %w", err)
-		}
+func handleDatabaseOperations(ctx context.Context, queries *migrations.Queries, userID int32, audioURL string, prompt migrations.AudioPrompt) error {
+	params := migrations.UpdateAudioPromptParams{
+		AudioPromptQuestion: migrations.NullAudioPrompt{
+			AudioPrompt: prompt,
+			Valid:       true,
+		},
+		AudioPromptAnswer: pgtype.Text{
+			String: audioURL,
+			Valid:  true,
+		},
+		ID: userID,
 	}
 
-	if err := tx.Commit().Error; err != nil {
-		return fmt.Errorf("commit failed: %w", err)
+	_, err := queries.UpdateAudioPrompt(ctx, params)
+	if err != nil {
+		return fmt.Errorf("sqlc UpdateUserAudioPrompt failed for user %d: %w", userID, err)
 	}
 
 	return nil
@@ -199,13 +253,16 @@ func handleDatabaseOperations(ctx context.Context, userID uint, audioURL string,
 func respondWithError(w http.ResponseWriter, code int, message string, operation string) {
 	log.Printf("[%s] Error %d: %s", operation, code, message)
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]any{
-		"error":   http.StatusText(code),
-		"message": message,
+	json.NewEncoder(w).Encode(ErrorResponse{
+		Success: false,
+		Message: message,
 	})
 }
 
 func isValidAudioType(mimeType string) bool {
-	return allowedAudioTypes[strings.ToLower(mimeType)]
+	_, ok := allowedAudioTypes[strings.ToLower(mimeType)]
+	return ok
 }

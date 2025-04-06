@@ -1,12 +1,9 @@
-package db
+package bak
 
 import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
-	"github.com/arnnvv/peeple-api/pkg/enums"
-	"github.com/lib/pq"
-	"gorm.io/gorm"
 	"strings"
 	"time"
 )

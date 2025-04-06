@@ -1,26 +1,24 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
 	"runtime"
 	"time"
 
-	"github.com/arnnvv/peeple-api/db"
+	"github.com/arnnvv/peeple-api/pkg/db"
 	"github.com/arnnvv/peeple-api/pkg/handlers"
 	"github.com/arnnvv/peeple-api/pkg/token"
 )
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
-
-	if err := db.InitDB(os.Getenv("DATABASE_URL")); err != nil {
-		log.Fatalf("Database connection failed: %v", err)
-	}
+	port := os.Getenv("PORT")
 
 	server := &http.Server{
-		Addr:              ":8080",
+		Addr:              ":" + port,
 		ReadHeaderTimeout: 2 * time.Second,
 		WriteTimeout:      5 * time.Second,
 		IdleTimeout:       30 * time.Second,
@@ -43,7 +41,7 @@ func main() {
 
 	go cleanupExpiredOTPs()
 
-	log.Println("Server is running on http://localhost:8080")
+	log.Printf("Server is running on http://localhost:%s\n", port)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
@@ -54,8 +52,6 @@ func cleanupExpiredOTPs() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		if err := db.DeleteExpiredOTPs(); err != nil {
-			log.Printf("Error cleaning up expired OTPs: %v", err)
-		}
+		db.GetDB().CleanOTPs(context.Background())
 	}
 }

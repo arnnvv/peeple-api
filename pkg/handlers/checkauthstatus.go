@@ -1,11 +1,17 @@
 package handlers
 
 import (
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
 
-	"github.com/arnnvv/peeple-api/db"
+	"github.com/arnnvv/peeple-api/migrations"
+	"github.com/arnnvv/peeple-api/pkg/db"
 	"github.com/arnnvv/peeple-api/pkg/token"
 	"github.com/arnnvv/peeple-api/pkg/utils"
+	"github.com/jackc/pgx/v5"
 )
 
 type AuthStatusResponse struct {
@@ -27,28 +33,53 @@ func CheckAuthStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var user db.UserModel
-	if err := db.DB.First(&user, claims.UserID).Error; err != nil {
-		utils.RespondWithJSON(w, http.StatusUnauthorized, AuthStatusResponse{
-			Success: false,
-			Status:  "login",
-			Message: "User not found",
-		})
+	userID := int32(claims.UserID)
+
+	var user migrations.User
+	var err error
+
+	queries := db.GetDB()
+	user, err = queries.GetUserByID(r.Context(), userID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
+			log.Printf("[%s] User not found for ID: %d", "handlers.CheckAuthStatus", userID)
+			respondAuthStatus(w, http.StatusUnauthorized, AuthStatusResponse{
+				Success: false,
+				Status:  "login",
+				Message: "User account not found",
+			})
+		} else {
+			log.Printf("[%s] Database error fetching user ID %d: %v", "handlers.CheckAuthStatus", userID, err)
+			respondAuthStatus(w, http.StatusInternalServerError, AuthStatusResponse{
+				Success: false,
+				Status:  "login", // generic error status will be btr
+				Message: "Error checking user status",
+			})
+		}
 		return
 	}
 
-	if user.Name == nil || *user.Name == "" {
-		utils.RespondWithJSON(w, http.StatusOK, AuthStatusResponse{
+	if !user.Name.Valid || user.Name.String == "" {
+		respondAuthStatus(w, http.StatusOK, AuthStatusResponse{
 			Success: true,
 			Status:  "onboarding",
-			Message: "User profile not completed",
+			Message: "User profile requires completion",
 		})
 		return
 	}
 
-	utils.RespondWithJSON(w, http.StatusOK, AuthStatusResponse{
+	respondAuthStatus(w, http.StatusOK, AuthStatusResponse{
 		Success: true,
 		Status:  "home",
-		Message: "User authenticated with complete profile",
+		Message: "User authenticated",
 	})
+
+}
+
+func respondAuthStatus(w http.ResponseWriter, code int, payload AuthStatusResponse) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		log.Printf("Error encoding auth status response: %v", err)
+	}
 }

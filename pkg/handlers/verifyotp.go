@@ -2,13 +2,14 @@ package handlers
 
 import (
 	"encoding/json"
-	"errors"
+	"log"
 	"net/http"
+	"time"
 
-	"github.com/arnnvv/peeple-api/db"
+	"github.com/arnnvv/peeple-api/pkg/db"
 	"github.com/arnnvv/peeple-api/pkg/token"
 	"github.com/arnnvv/peeple-api/pkg/utils"
-	"gorm.io/gorm"
+	"github.com/jackc/pgx/v5"
 )
 
 type VerifyOTPRequest struct {
@@ -24,6 +25,8 @@ type VerifyOTPResponse struct {
 
 func VerifyOTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	ctx := r.Context()
+	queries := db.GetDB()
 
 	if r.Method != http.MethodPost {
 		utils.RespondWithJSON(w, http.StatusMethodNotAllowed, VerifyOTPResponse{
@@ -58,37 +61,69 @@ func VerifyOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isValid, err := db.VerifyOTP(req.PhoneNumber, req.OTPCode)
+	user, err := queries.GetUserByPhone(ctx, req.PhoneNumber)
 	if err != nil {
-		utils.RespondWithJSON(w, http.StatusInternalServerError, VerifyOTPResponse{
-			Success: false,
-			Message: "Failed to verify OTP",
-		})
+		if err == pgx.ErrNoRows {
+			utils.RespondWithJSON(w, http.StatusUnauthorized, VerifyOTPResponse{
+				Success: false,
+				Message: "User not found or invalid phone number.",
+			})
+		} else {
+			log.Printf("Error finding user by phone %s during OTP verify: %v", req.PhoneNumber, err)
+			utils.RespondWithJSON(w, http.StatusInternalServerError, VerifyOTPResponse{
+				Success: false,
+				Message: "Database error verifying user",
+			})
+		}
+		return
+	}
+	userID := user.ID // user's ID (int32)
+
+	storedOtp, err := queries.GetOTPByUser(ctx, userID)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			utils.RespondWithJSON(w, http.StatusUnauthorized, VerifyOTPResponse{
+				Success: false,
+				Message: "Invalid or expired OTP.",
+			})
+		} else {
+			log.Printf("Error fetching OTP for user %d: %v", userID, err)
+			utils.RespondWithJSON(w, http.StatusInternalServerError, VerifyOTPResponse{
+				Success: false,
+				Message: "Database error fetching OTP",
+			})
+		}
 		return
 	}
 
-	if !isValid {
+	if storedOtp.OtpCode != req.OTPCode {
 		utils.RespondWithJSON(w, http.StatusUnauthorized, VerifyOTPResponse{
 			Success: false,
-			Message: "Invalid or expired OTP",
+			Message: "Invalid or expired OTP.",
 		})
 		return
 	}
 
-	userID, err := createOrGetUser(req.PhoneNumber)
-	if err != nil {
-		utils.RespondWithJSON(w, http.StatusInternalServerError, VerifyOTPResponse{
+	if !storedOtp.ExpiresAt.Valid || time.Now().After(storedOtp.ExpiresAt.Time) {
+		_ = queries.DeleteOTPByID(ctx, storedOtp.ID)
+		utils.RespondWithJSON(w, http.StatusUnauthorized, VerifyOTPResponse{
 			Success: false,
-			Message: "Failed to create user",
+			Message: "Invalid or expired OTP.",
 		})
 		return
 	}
 
-	tokenString, err := generateToken(userID)
+	err = queries.DeleteOTPByID(ctx, storedOtp.ID)
 	if err != nil {
+		log.Printf("Warning: Failed to delete OTP ID %d for user %d after successful verification: %v", storedOtp.ID, userID, err)
+	}
+
+	tokenString, err := token.GenerateToken(userID)
+	if err != nil {
+		log.Printf("Failed to generate token for user %d: %v", userID, err)
 		utils.RespondWithJSON(w, http.StatusInternalServerError, VerifyOTPResponse{
 			Success: false,
-			Message: "Failed to generate token",
+			Message: "Failed to generate authentication token",
 		})
 		return
 	}
@@ -98,35 +133,4 @@ func VerifyOTP(w http.ResponseWriter, r *http.Request) {
 		Message: "OTP verified successfully",
 		Token:   tokenString,
 	})
-}
-
-func createOrGetUser(phoneNumber string) (uint, error) {
-	var user db.UserModel
-	result := db.DB.Where("phone_number = ?", phoneNumber).First(&user)
-
-	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			newUser := db.UserModel{
-				PhoneNumber: &phoneNumber,
-			}
-
-			if err := db.DB.Create(&newUser).Error; err != nil {
-				return 0, err
-			}
-
-			return newUser.ID, nil
-		}
-		return 0, result.Error
-	}
-
-	return user.ID, nil
-}
-
-func generateToken(userID uint) (string, error) {
-	tokenString, err := token.GenerateToken(userID)
-	if err != nil {
-		return "", err
-	}
-
-	return tokenString, nil
 }
