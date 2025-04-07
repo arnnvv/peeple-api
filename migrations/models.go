@@ -560,6 +560,22 @@ type DateVibesPrompt struct {
 	Answer   string
 }
 
+type Filter struct {
+	UserID int32
+	// Which gender the user wants to see in their feed.
+	WhoYouWantToSee NullGenderEnum
+	// Maximum distance in kilometers for potential matches.
+	RadiusKm pgtype.Int4
+	// Filter for users active within the last 24 hours.
+	ActiveToday bool
+	// Minimum age preference.
+	AgeMin pgtype.Int4
+	// Maximum age preference.
+	AgeMax    pgtype.Int4
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
+}
+
 type GettingPersonalPrompt struct {
 	ID       int32
 	UserID   int32
