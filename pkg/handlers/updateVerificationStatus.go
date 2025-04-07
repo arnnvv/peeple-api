@@ -76,7 +76,7 @@ func UpdateVerificationStatusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	json.NewEncoder(w).Encode(map[string]any{
 		"success": true,
 		"message": "Verification status updated successfully",
 		"user_id": req.UserID,
