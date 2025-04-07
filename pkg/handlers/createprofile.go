@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log" // Import log package
 	"net/http"
 	"regexp"
 	"strconv"
@@ -13,15 +14,17 @@ import (
 	"time"
 
 	"github.com/arnnvv/peeple-api/migrations"
+	"github.com/arnnvv/peeple-api/pkg/db" // Import db package
 	"github.com/arnnvv/peeple-api/pkg/token"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
+	// "github.com/jackc/pgx/v5/pgxpool" // No longer needed here
 )
 
-var dbPool *pgxpool.Pool
+// var dbPool *pgxpool.Pool // REMOVED: Use db.GetDB() and db.GetPool() instead
 
 func respondError(w http.ResponseWriter, msg string, code int) {
+	log.Printf("[ERROR %d] %s", code, msg) // Log errors
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]any{
@@ -59,9 +62,22 @@ func CreateProfile(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("\n=== Starting Profile Creation (sqlc) ===")
 	defer fmt.Println("=== End Profile Creation (sqlc) ===")
 
+	// Get DB Queries object
+	queries := db.GetDB()
+	if queries == nil {
+		respondError(w, "Database connection is not available", http.StatusInternalServerError)
+		return
+	}
+	// Get the pool for transaction management
+	pool := db.GetPool()
+	if pool == nil {
+		respondError(w, "Database connection pool is not available for transaction", http.StatusInternalServerError)
+		return
+	}
+
 	claims, ok := ctx.Value(token.ClaimsContextKey).(*token.Claims)
 	if !ok || claims == nil {
-		respondError(w, "Invalid token", http.StatusUnauthorized)
+		respondError(w, "Invalid token claims", http.StatusUnauthorized) // More specific error
 		return
 	}
 	userID := int32(claims.UserID)
@@ -72,7 +88,7 @@ func CreateProfile(w http.ResponseWriter, r *http.Request) {
 		respondError(w, "Failed to read request body", http.StatusInternalServerError)
 		return
 	}
-	r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+	r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes)) // Rewind body for potential re-reads (though not needed here)
 	fmt.Printf("[Request] Raw body: %s\n", string(bodyBytes))
 
 	var reqData createProfileRequest
@@ -82,9 +98,8 @@ func CreateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	q := migrations.New(dbPool)
-
-	_, err = q.GetUserByID(ctx, userID)
+	// Use the obtained queries object
+	_, err = queries.GetUserByID(ctx, userID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			fmt.Printf("[Error] User lookup failed: User ID %d not found\n", userID)
@@ -97,6 +112,7 @@ func CreateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Printf("[Existing User] Found User ID: %d\n", userID)
 
+	// --- Parameter Preparation ---
 	var genderParam migrations.NullGenderEnum
 	if reqData.Gender != nil {
 		genderParam = migrations.NullGenderEnum{GenderEnum: *reqData.Gender, Valid: true}
@@ -104,20 +120,48 @@ func CreateProfile(w http.ResponseWriter, r *http.Request) {
 		genderParam = migrations.NullGenderEnum{Valid: false}
 	}
 
+	var datingIntentionParam migrations.NullDatingIntention
+	if reqData.DatingIntention != nil {
+		datingIntentionParam = migrations.NullDatingIntention{DatingIntention: *reqData.DatingIntention, Valid: true}
+	} else {
+		datingIntentionParam = migrations.NullDatingIntention{Valid: false}
+	}
+
+	var religiousBeliefsParam migrations.NullReligion
+	if reqData.ReligiousBeliefs != nil {
+		religiousBeliefsParam = migrations.NullReligion{Religion: *reqData.ReligiousBeliefs, Valid: true}
+	} else {
+		religiousBeliefsParam = migrations.NullReligion{Valid: false}
+	}
+
+	var drinkingHabitParam migrations.NullDrinkingSmokingHabits
+	if reqData.DrinkingHabit != nil {
+		drinkingHabitParam = migrations.NullDrinkingSmokingHabits{DrinkingSmokingHabits: *reqData.DrinkingHabit, Valid: true}
+	} else {
+		drinkingHabitParam = migrations.NullDrinkingSmokingHabits{Valid: false}
+	}
+
+	var smokingHabitParam migrations.NullDrinkingSmokingHabits
+	if reqData.SmokingHabit != nil {
+		smokingHabitParam = migrations.NullDrinkingSmokingHabits{DrinkingSmokingHabits: *reqData.SmokingHabit, Valid: true}
+	} else {
+		smokingHabitParam = migrations.NullDrinkingSmokingHabits{Valid: false}
+	}
+
 	updateParams := migrations.UpdateUserProfileParams{
 		ID:               userID,
-		Name:             pgtype.Text{String: *reqData.Name, Valid: reqData.Name != nil && *reqData.Name != ""},
-		LastName:         pgtype.Text{String: *reqData.LastName, Valid: reqData.LastName != nil},
-		Latitude:         pgtype.Float8{Float64: *reqData.Latitude, Valid: reqData.Latitude != nil},
-		Longitude:        pgtype.Float8{Float64: *reqData.Longitude, Valid: reqData.Longitude != nil},
+		Name:             pgtype.Text{String: derefString(reqData.Name), Valid: reqData.Name != nil && *reqData.Name != ""},
+		LastName:         pgtype.Text{String: derefString(reqData.LastName), Valid: reqData.LastName != nil},
+		Latitude:         pgtype.Float8{Float64: derefFloat64(reqData.Latitude), Valid: reqData.Latitude != nil},
+		Longitude:        pgtype.Float8{Float64: derefFloat64(reqData.Longitude), Valid: reqData.Longitude != nil},
 		Gender:           genderParam,
-		DatingIntention:  migrations.NullDatingIntention{DatingIntention: *reqData.DatingIntention, Valid: reqData.DatingIntention != nil},
-		Hometown:         pgtype.Text{String: *reqData.Hometown, Valid: reqData.Hometown != nil},
-		JobTitle:         pgtype.Text{String: *reqData.JobTitle, Valid: reqData.JobTitle != nil},
-		Education:        pgtype.Text{String: *reqData.Education, Valid: reqData.Education != nil},
-		ReligiousBeliefs: migrations.NullReligion{Religion: *reqData.ReligiousBeliefs, Valid: reqData.ReligiousBeliefs != nil},
-		DrinkingHabit:    migrations.NullDrinkingSmokingHabits{DrinkingSmokingHabits: *reqData.DrinkingHabit, Valid: reqData.DrinkingHabit != nil},
-		SmokingHabit:     migrations.NullDrinkingSmokingHabits{DrinkingSmokingHabits: *reqData.SmokingHabit, Valid: reqData.SmokingHabit != nil},
+		DatingIntention:  datingIntentionParam,
+		Hometown:         pgtype.Text{String: derefString(reqData.Hometown), Valid: reqData.Hometown != nil},
+		JobTitle:         pgtype.Text{String: derefString(reqData.JobTitle), Valid: reqData.JobTitle != nil},
+		Education:        pgtype.Text{String: derefString(reqData.Education), Valid: reqData.Education != nil},
+		ReligiousBeliefs: religiousBeliefsParam,
+		DrinkingHabit:    drinkingHabitParam,
+		SmokingHabit:     smokingHabitParam,
 	}
 
 	if reqData.DateOfBirth != nil && *reqData.DateOfBirth != "" {
@@ -128,7 +172,7 @@ func CreateProfile(w http.ResponseWriter, r *http.Request) {
 		}
 		updateParams.DateOfBirth = pgtype.Date{Time: dob, Valid: true}
 	} else {
-		updateParams.DateOfBirth = pgtype.Date{Valid: false}
+		updateParams.DateOfBirth = pgtype.Date{Valid: false} // Explicitly set Valid to false if DOB is nil or empty
 	}
 
 	if reqData.Height != nil && *reqData.Height != "" {
@@ -139,7 +183,7 @@ func CreateProfile(w http.ResponseWriter, r *http.Request) {
 		}
 		updateParams.Height = pgtype.Float8{Float64: heightInches, Valid: true}
 	} else {
-		updateParams.Height = pgtype.Float8{Valid: false}
+		updateParams.Height = pgtype.Float8{Valid: false} // Explicitly set Valid to false if Height is nil or empty
 	}
 
 	if err := validateProfileSqlc(updateParams, reqData.Prompts); err != nil {
@@ -150,15 +194,18 @@ func CreateProfile(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("[Validation] Input data passed validation.")
 
 	fmt.Println("[Database] Starting transaction...")
-	tx, err := dbPool.Begin(ctx)
+	// Use the obtained pool to begin transaction
+	tx, err := pool.Begin(ctx)
 	if err != nil {
 		fmt.Printf("[Database Error] Failed to begin transaction: %v\n", err)
 		respondError(w, "Database error starting transaction", http.StatusInternalServerError)
 		return
 	}
-	defer tx.Rollback(ctx)
+	// Ensure rollback happens if commit doesn't
+	defer tx.Rollback(ctx) // Rollback is safe to call even after commit
 
-	qtx := q.WithTx(tx)
+	// Use the original queries object with the transaction
+	qtx := queries.WithTx(tx)
 
 	fmt.Println("[Database] Updating user profile...")
 	_, err = qtx.UpdateUserProfile(ctx, updateParams)
@@ -169,71 +216,88 @@ func CreateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Println("[Database] User profile updated.")
 
+	// --- Prompt Handling within Transaction ---
 	fmt.Println("[Database] Deleting existing prompts...")
 	if err := qtx.DeleteUserDateVibesPrompts(ctx, userID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		fmt.Printf("[Database Error] Failed to delete Date Vibes prompts: %v\n", err)
 		respondError(w, "Failed to update prompts (delete DV)", http.StatusInternalServerError)
-		return
+		return // Exit on error
 	}
 	if err := qtx.DeleteUserGettingPersonalPrompts(ctx, userID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		fmt.Printf("[Database Error] Failed to delete Getting Personal prompts: %v\n", err)
 		respondError(w, "Failed to update prompts (delete GP)", http.StatusInternalServerError)
-		return
+		return // Exit on error
 	}
 	if err := qtx.DeleteUserMyTypePrompts(ctx, userID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		fmt.Printf("[Database Error] Failed to delete My Type prompts: %v\n", err)
 		respondError(w, "Failed to update prompts (delete MT)", http.StatusInternalServerError)
-		return
+		return // Exit on error
 	}
 	if err := qtx.DeleteUserStoryTimePrompts(ctx, userID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		fmt.Printf("[Database Error] Failed to delete Story Time prompts: %v\n", err)
 		respondError(w, "Failed to update prompts (delete ST)", http.StatusInternalServerError)
-		return
+		return // Exit on error
 	}
 	fmt.Println("[Database] Existing prompts deleted.")
 
 	fmt.Printf("[Database] Creating %d new prompts...\n", len(reqData.Prompts))
 	for i, p := range reqData.Prompts {
 		fmt.Printf("[Database] Processing prompt %d: Category=%s, Question=%s\n", i+1, p.Category, p.Question)
+		var promptErr error
 		switch p.Category {
 		case "dateVibes":
-			promptEnum := migrations.DateVibesPromptType(p.Question)
-			_, err = qtx.CreateDateVibesPrompt(ctx, migrations.CreateDateVibesPromptParams{
+			promptEnum, err := parseDateVibesEnum(p.Question)
+			if err != nil {
+				promptErr = fmt.Errorf("invalid dateVibes question '%s'", p.Question)
+				break
+			}
+			_, promptErr = qtx.CreateDateVibesPrompt(ctx, migrations.CreateDateVibesPromptParams{
 				UserID:   userID,
 				Question: promptEnum,
 				Answer:   p.Answer,
 			})
 		case "gettingPersonal":
-			promptEnum := migrations.GettingPersonalPromptType(p.Question)
-			_, err = qtx.CreateGettingPersonalPrompt(ctx, migrations.CreateGettingPersonalPromptParams{
+			promptEnum, err := parseGettingPersonalEnum(p.Question)
+			if err != nil {
+				promptErr = fmt.Errorf("invalid gettingPersonal question '%s'", p.Question)
+				break
+			}
+			_, promptErr = qtx.CreateGettingPersonalPrompt(ctx, migrations.CreateGettingPersonalPromptParams{
 				UserID:   userID,
 				Question: promptEnum,
 				Answer:   p.Answer,
 			})
 		case "myType":
-			promptEnum := migrations.MyTypePromptType(p.Question)
-			_, err = qtx.CreateMyTypePrompt(ctx, migrations.CreateMyTypePromptParams{
+			promptEnum, err := parseMyTypeEnum(p.Question)
+			if err != nil {
+				promptErr = fmt.Errorf("invalid myType question '%s'", p.Question)
+				break
+			}
+			_, promptErr = qtx.CreateMyTypePrompt(ctx, migrations.CreateMyTypePromptParams{
 				UserID:   userID,
 				Question: promptEnum,
 				Answer:   p.Answer,
 			})
 		case "storyTime":
-			promptEnum := migrations.StoryTimePromptType(p.Question)
-			_, err = qtx.CreateStoryTimePrompt(ctx, migrations.CreateStoryTimePromptParams{
+			promptEnum, err := parseStoryTimeEnum(p.Question)
+			if err != nil {
+				promptErr = fmt.Errorf("invalid storyTime question '%s'", p.Question)
+				break
+			}
+			_, promptErr = qtx.CreateStoryTimePrompt(ctx, migrations.CreateStoryTimePromptParams{
 				UserID:   userID,
 				Question: promptEnum,
 				Answer:   p.Answer,
 			})
 		default:
-			fmt.Printf("[Error] Unknown prompt category '%s' during creation\n", p.Category)
-			respondError(w, fmt.Sprintf("Internal error: Unknown prompt category %s", p.Category), http.StatusInternalServerError)
-			return
+			promptErr = fmt.Errorf("unknown prompt category '%s'", p.Category)
 		}
 
-		if err != nil {
-			fmt.Printf("[Database Error] Failed to create prompt (Cat: %s, Q: %s): %v\n", p.Category, p.Question, err)
-			respondError(w, "Failed to save prompts", http.StatusInternalServerError)
-			return
+		if promptErr != nil {
+			fmt.Printf("[Database Error] Failed to create prompt (Cat: %s, Q: %s): %v\n", p.Category, p.Question, promptErr)
+			// No need to rollback here, defer tx.Rollback(ctx) handles it
+			respondError(w, fmt.Sprintf("Failed to save prompt: %v", promptErr), http.StatusInternalServerError)
+			return // Exit on first prompt error
 		}
 	}
 	fmt.Println("[Database] New prompts created.")
@@ -254,14 +318,109 @@ func CreateProfile(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("[Success] Profile update complete.")
 }
 
+// --- Helper functions for parsing enums safely ---
+
+func parseDateVibesEnum(s string) (migrations.DateVibesPromptType, error) {
+	val := migrations.DateVibesPromptType(s)
+	switch val {
+	case migrations.DateVibesPromptTypeTogetherWeCould,
+		migrations.DateVibesPromptTypeFirstRoundIsOnMeIf,
+		migrations.DateVibesPromptTypeWhatIOrderForTheTable,
+		migrations.DateVibesPromptTypeBestSpotInTown,
+		migrations.DateVibesPromptTypeBestWayToAskMeOut:
+		return val, nil
+	default:
+		return "", fmt.Errorf("invalid DateVibesPromptType: %s", s)
+	}
+}
+
+func parseGettingPersonalEnum(s string) (migrations.GettingPersonalPromptType, error) {
+	val := migrations.GettingPersonalPromptType(s)
+	switch val {
+	case migrations.GettingPersonalPromptTypeOneThingYouShouldKnow,
+		migrations.GettingPersonalPromptTypeLoveLanguage,
+		migrations.GettingPersonalPromptTypeDorkiestThing,
+		migrations.GettingPersonalPromptTypeDontHateMeIf,
+		migrations.GettingPersonalPromptTypeGeekOutOn,
+		migrations.GettingPersonalPromptTypeIfLovingThisIsWrong,
+		migrations.GettingPersonalPromptTypeKeyToMyHeart,
+		migrations.GettingPersonalPromptTypeWontShutUpAbout,
+		migrations.GettingPersonalPromptTypeShouldNotGoOutWithMeIf,
+		migrations.GettingPersonalPromptTypeWhatIfIToldYouThat:
+		return val, nil
+	default:
+		return "", fmt.Errorf("invalid GettingPersonalPromptType: %s", s)
+	}
+}
+
+func parseMyTypeEnum(s string) (migrations.MyTypePromptType, error) {
+	val := migrations.MyTypePromptType(s)
+	switch val {
+	case migrations.MyTypePromptTypeNonNegotiable,
+		migrations.MyTypePromptTypeHallmarkOfGoodRelationship,
+		migrations.MyTypePromptTypeLookingFor,
+		migrations.MyTypePromptTypeWeirdlyAttractedTo,
+		migrations.MyTypePromptTypeAllIAskIsThatYou,
+		migrations.MyTypePromptTypeWellGetAlongIf,
+		migrations.MyTypePromptTypeWantSomeoneWho,
+		migrations.MyTypePromptTypeGreenFlags,
+		migrations.MyTypePromptTypeSameTypeOfWeird,
+		migrations.MyTypePromptTypeFallForYouIf,
+		migrations.MyTypePromptTypeBragAboutYou:
+		return val, nil
+	default:
+		return "", fmt.Errorf("invalid MyTypePromptType: %s", s)
+	}
+}
+
+func parseStoryTimeEnum(s string) (migrations.StoryTimePromptType, error) {
+	val := migrations.StoryTimePromptType(s)
+	switch val {
+	case migrations.StoryTimePromptTypeTwoTruthsAndALie,
+		migrations.StoryTimePromptTypeWorstIdea,
+		migrations.StoryTimePromptTypeBiggestRisk,
+		migrations.StoryTimePromptTypeBiggestDateFail,
+		migrations.StoryTimePromptTypeNeverHaveIEver,
+		migrations.StoryTimePromptTypeBestTravelStory,
+		migrations.StoryTimePromptTypeWeirdestGift,
+		migrations.StoryTimePromptTypeMostSpontaneous,
+		migrations.StoryTimePromptTypeOneThingNeverDoAgain:
+		return val, nil
+	default:
+		return "", fmt.Errorf("invalid StoryTimePromptType: %s", s)
+	}
+}
+
+// --- Helper functions for dereferencing pointers safely ---
+
+func derefString(s *string) string {
+	if s != nil {
+		return *s
+	}
+	return ""
+}
+
+func derefFloat64(f *float64) float64 {
+	if f != nil {
+		return *f
+	}
+	return 0.0
+}
+
+// --- Validation Logic (unchanged, but now uses helpers) ---
+
 var heightRegex = regexp.MustCompile(`^[4-6]'([0-9]|1[0-1])"$`)
 
 func validateProfileSqlc(params migrations.UpdateUserProfileParams, prompts []promptRequest) error {
 	fmt.Println("\n=== Starting Profile Validation (sqlc) ===")
 	defer fmt.Println("=== End Profile Validation (sqlc) ===\n")
 
-	if !params.Name.Valid || len(params.Name.String) == 0 || len(params.Name.String) > 20 {
-		return fmt.Errorf("name must be present and between 1 and 20 characters")
+	// Basic Info
+	if !params.Name.Valid || len(params.Name.String) == 0 {
+		return fmt.Errorf("name is required")
+	}
+	if len(params.Name.String) > 20 {
+		return fmt.Errorf("name must not exceed 20 characters")
 	}
 	fmt.Printf("[Validation] Name: OK ('%s')\n", params.Name.String)
 
@@ -273,7 +432,10 @@ func validateProfileSqlc(params migrations.UpdateUserProfileParams, prompts []pr
 	if !params.DateOfBirth.Valid {
 		return fmt.Errorf("date of birth is required")
 	}
-	age := time.Since(params.DateOfBirth.Time).Hours() / 24 / 365
+	if params.DateOfBirth.Time.IsZero() {
+		return fmt.Errorf("date of birth appears invalid or was not parsed correctly")
+	}
+	age := time.Since(params.DateOfBirth.Time).Hours() / 24 / 365.25
 	fmt.Printf("[Validation] DOB: OK (%s), Calculated Age: %.2f\n", params.DateOfBirth.Time.Format("2006-01-02"), age)
 	if age < 18 {
 		return fmt.Errorf("must be at least 18 years old")
@@ -282,8 +444,15 @@ func validateProfileSqlc(params migrations.UpdateUserProfileParams, prompts []pr
 	if !params.Latitude.Valid || !params.Longitude.Valid {
 		return fmt.Errorf("latitude and longitude are required")
 	}
+	if params.Latitude.Float64 < -90 || params.Latitude.Float64 > 90 {
+		return fmt.Errorf("latitude must be between -90 and 90")
+	}
+	if params.Longitude.Float64 < -180 || params.Longitude.Float64 > 180 {
+		return fmt.Errorf("longitude must be between -180 and 180")
+	}
 	fmt.Printf("[Validation] Location: OK (Lat: %.6f, Lon: %.6f)\n", params.Latitude.Float64, params.Longitude.Float64)
 
+	// Profile Details
 	if !params.Height.Valid {
 		return fmt.Errorf("height is required")
 	}
@@ -292,7 +461,7 @@ func validateProfileSqlc(params migrations.UpdateUserProfileParams, prompts []pr
 	if !params.Gender.Valid {
 		return fmt.Errorf("gender is required")
 	}
-	fmt.Printf("[Validation] Gender: OK (%s)\n", params.Gender)
+	fmt.Printf("[Validation] Gender: OK (%s)\n", params.Gender.GenderEnum)
 
 	if !params.DatingIntention.Valid {
 		return fmt.Errorf("dating intention is required")
@@ -314,21 +483,23 @@ func validateProfileSqlc(params migrations.UpdateUserProfileParams, prompts []pr
 	}
 	fmt.Printf("[Validation] Smoking Habit: OK (%s)\n", params.SmokingHabit.DrinkingSmokingHabits)
 
-	if params.Hometown.Valid && len(params.Hometown.String) > 15 {
-		return fmt.Errorf("hometown must not exceed 15 characters")
+	// Optional Fields Length Checks (LIMITS UPDATED HERE)
+	if params.Hometown.Valid && len(params.Hometown.String) > 30 { // Changed 15 to 30
+		return fmt.Errorf("hometown must not exceed 30 characters") // Updated message
 	}
-	fmt.Printf("[Validation] Hometown: OK (Valid: %t, Value: '%s')\n", params.Hometown.Valid, params.Hometown.String)
+	fmt.Printf("[Validation] Hometown: OK (Valid: %t, Value: '%s', Limit: 30)\n", params.Hometown.Valid, params.Hometown.String)
 
-	if params.JobTitle.Valid && len(params.JobTitle.String) > 15 {
-		return fmt.Errorf("job title must not exceed 15 characters")
+	if params.JobTitle.Valid && len(params.JobTitle.String) > 30 { // Changed 15 to 30
+		return fmt.Errorf("job title must not exceed 30 characters") // Updated message
 	}
-	fmt.Printf("[Validation] JobTitle: OK (Valid: %t, Value: '%s')\n", params.JobTitle.Valid, params.JobTitle.String)
+	fmt.Printf("[Validation] JobTitle: OK (Valid: %t, Value: '%s', Limit: 30)\n", params.JobTitle.Valid, params.JobTitle.String)
 
-	if params.Education.Valid && len(params.Education.String) > 15 {
-		return fmt.Errorf("education must not exceed 15 characters")
+	if params.Education.Valid && len(params.Education.String) > 30 { // Changed 15 to 30
+		return fmt.Errorf("education must not exceed 30 characters") // Updated message
 	}
-	fmt.Printf("[Validation] Education: OK (Valid: %t, Value: '%s')\n", params.Education.Valid, params.Education.String)
+	fmt.Printf("[Validation] Education: OK (Valid: %t, Value: '%s', Limit: 30)\n", params.Education.Valid, params.Education.String)
 
+	// Prompt Validation
 	fmt.Printf("[Validation] Checking prompts. Count: %d\n", len(prompts))
 	if len(prompts) == 0 {
 		return fmt.Errorf("at least one prompt is required")
@@ -347,73 +518,35 @@ func validateProfileSqlc(params migrations.UpdateUserProfileParams, prompts []pr
 			return fmt.Errorf("prompt %d: question is required", i+1)
 		}
 		if strings.TrimSpace(p.Answer) == "" {
-			return fmt.Errorf("prompt %d: answer cannot be empty", i+1)
+			return fmt.Errorf("prompt %d: answer cannot be empty or just whitespace", i+1)
 		}
 		if len(p.Answer) > 255 {
 			return fmt.Errorf("prompt %d: answer exceeds maximum length (255 chars)", i+1)
 		}
 
-		isValidPrompt := false
+		var parseErr error
 		switch p.Category {
 		case "dateVibes":
-			_, isValidPrompt = map[migrations.DateVibesPromptType]bool{
-				migrations.DateVibesPromptTypeTogetherWeCould:       true,
-				migrations.DateVibesPromptTypeFirstRoundIsOnMeIf:    true,
-				migrations.DateVibesPromptTypeWhatIOrderForTheTable: true,
-				migrations.DateVibesPromptTypeBestSpotInTown:        true,
-				migrations.DateVibesPromptTypeBestWayToAskMeOut:     true,
-			}[migrations.DateVibesPromptType(p.Question)]
+			_, parseErr = parseDateVibesEnum(p.Question)
 		case "gettingPersonal":
-			_, isValidPrompt = map[migrations.GettingPersonalPromptType]bool{
-				migrations.GettingPersonalPromptTypeOneThingYouShouldKnow:  true,
-				migrations.GettingPersonalPromptTypeLoveLanguage:           true,
-				migrations.GettingPersonalPromptTypeDorkiestThing:          true,
-				migrations.GettingPersonalPromptTypeDontHateMeIf:           true,
-				migrations.GettingPersonalPromptTypeGeekOutOn:              true,
-				migrations.GettingPersonalPromptTypeIfLovingThisIsWrong:    true,
-				migrations.GettingPersonalPromptTypeKeyToMyHeart:           true,
-				migrations.GettingPersonalPromptTypeWontShutUpAbout:        true,
-				migrations.GettingPersonalPromptTypeShouldNotGoOutWithMeIf: true,
-				migrations.GettingPersonalPromptTypeWhatIfIToldYouThat:     true,
-			}[migrations.GettingPersonalPromptType(p.Question)]
+			_, parseErr = parseGettingPersonalEnum(p.Question)
 		case "myType":
-			_, isValidPrompt = map[migrations.MyTypePromptType]bool{
-				migrations.MyTypePromptTypeNonNegotiable:              true,
-				migrations.MyTypePromptTypeHallmarkOfGoodRelationship: true,
-				migrations.MyTypePromptTypeLookingFor:                 true,
-				migrations.MyTypePromptTypeWeirdlyAttractedTo:         true,
-				migrations.MyTypePromptTypeAllIAskIsThatYou:           true,
-				migrations.MyTypePromptTypeWellGetAlongIf:             true,
-				migrations.MyTypePromptTypeWantSomeoneWho:             true,
-				migrations.MyTypePromptTypeGreenFlags:                 true,
-				migrations.MyTypePromptTypeSameTypeOfWeird:            true,
-				migrations.MyTypePromptTypeFallForYouIf:               true,
-				migrations.MyTypePromptTypeBragAboutYou:               true,
-			}[migrations.MyTypePromptType(p.Question)]
+			_, parseErr = parseMyTypeEnum(p.Question)
 		case "storyTime":
-			_, isValidPrompt = map[migrations.StoryTimePromptType]bool{
-				migrations.StoryTimePromptTypeTwoTruthsAndALie:     true,
-				migrations.StoryTimePromptTypeWorstIdea:            true,
-				migrations.StoryTimePromptTypeBiggestRisk:          true,
-				migrations.StoryTimePromptTypeBiggestDateFail:      true,
-				migrations.StoryTimePromptTypeNeverHaveIEver:       true,
-				migrations.StoryTimePromptTypeBestTravelStory:      true,
-				migrations.StoryTimePromptTypeWeirdestGift:         true,
-				migrations.StoryTimePromptTypeMostSpontaneous:      true,
-				migrations.StoryTimePromptTypeOneThingNeverDoAgain: true,
-			}[migrations.StoryTimePromptType(p.Question)]
+			_, parseErr = parseStoryTimeEnum(p.Question)
 		default:
 			return fmt.Errorf("prompt %d: unknown category '%s'", i+1, p.Category)
 		}
 
-		if !isValidPrompt {
-			return fmt.Errorf("prompt %d: question '%s' is not a valid question for category '%s'", i+1, p.Question, p.Category)
+		if parseErr != nil {
+			return fmt.Errorf("prompt %d: invalid question '%s' for category '%s'", i+1, p.Question, p.Category)
 		}
 
-		if promptQuestions[p.Question] {
-			return fmt.Errorf("prompt question '%s' cannot be used more than once", p.Question)
+		questionKey := fmt.Sprintf("%s:%s", p.Category, p.Question)
+		if promptQuestions[questionKey] {
+			return fmt.Errorf("prompt question '%s' under category '%s' cannot be used more than once", p.Question, p.Category)
 		}
-		promptQuestions[p.Question] = true
+		promptQuestions[questionKey] = true
 
 		fmt.Printf("[Validation] Prompt %d: OK\n", i+1)
 	}
@@ -426,22 +559,35 @@ func parseHeightString(heightStr string) (float64, error) {
 	if !heightRegex.MatchString(heightStr) {
 		return 0, fmt.Errorf("invalid format. Use F'I\" (e.g., 5'10\")")
 	}
-	parts := strings.Split(strings.TrimSuffix(heightStr, "\""), "'")
+	// Improved splitting to handle potential extra spaces
+	parts := strings.Split(strings.TrimSpace(strings.TrimSuffix(heightStr, "\"")), "'")
 	if len(parts) != 2 {
-		return 0, fmt.Errorf("internal parsing error")
+		// Attempt to fix common issue like "5' 10\""
+		parts = strings.FieldsFunc(strings.TrimSuffix(heightStr, "\""), func(r rune) bool {
+			return r == '\'' || r == ' '
+		})
+		if len(parts) != 2 {
+			return 0, fmt.Errorf("internal parsing error, expected format F'I\"")
+		}
 	}
 
-	feet, err := strconv.Atoi(parts[0])
+	feetStr := strings.TrimSpace(parts[0])
+	inchesStr := strings.TrimSpace(parts[1])
+
+	feet, err := strconv.Atoi(feetStr)
 	if err != nil {
-		return 0, fmt.Errorf("invalid feet value: %w", err)
+		return 0, fmt.Errorf("invalid feet value '%s': %w", feetStr, err)
 	}
-	inches, err := strconv.Atoi(parts[1])
+	inches, err := strconv.Atoi(inchesStr)
 	if err != nil {
-		return 0, fmt.Errorf("invalid inches value: %w", err)
+		return 0, fmt.Errorf("invalid inches value '%s': %w", inchesStr, err)
 	}
 
-	if feet < 4 || feet > 6 || inches < 0 || inches > 11 {
-		return 0, fmt.Errorf("values out of range (4'0\" to 6'11\")")
+	if feet < 4 || feet > 6 {
+		return 0, fmt.Errorf("feet value must be between 4 and 6")
+	}
+	if inches < 0 || inches > 11 {
+		return 0, fmt.Errorf("inches value must be between 0 and 11")
 	}
 
 	totalInches := float64(feet*12 + inches)
