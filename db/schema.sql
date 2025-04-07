@@ -215,3 +215,38 @@ CREATE TABLE date_vibes_prompts (
         ON DELETE CASCADE,
     CONSTRAINT uq_user_date_vibes_prompts UNIQUE (user_id, question)
 );
+
+-- Function to update the updated_at column
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+   NEW.updated_at = NOW();
+   RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Filters table
+CREATE TABLE filters (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    who_you_want_to_see gender_enum, -- Can be 'man' or 'woman' from existing enum
+    radius_km INTEGER CHECK (radius_km > 0 AND radius_km <= 500), -- Example constraint: 1-500 km
+    active_today BOOLEAN NOT NULL DEFAULT false,
+    age_min INTEGER CHECK (age_min >= 18),
+    age_max INTEGER CHECK (age_max >= 18),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT age_check CHECK (age_max >= age_min) -- Ensure max age is not less than min age
+);
+
+COMMENT ON COLUMN filters.who_you_want_to_see IS 'Which gender the user wants to see in their feed.';
+COMMENT ON COLUMN filters.radius_km IS 'Maximum distance in kilometers for potential matches.';
+COMMENT ON COLUMN filters.active_today IS 'Filter for users active within the last 24 hours.';
+COMMENT ON COLUMN filters.age_min IS 'Minimum age preference.';
+COMMENT ON COLUMN filters.age_max IS 'Maximum age preference.';
+
+
+-- Trigger to automatically update updated_at on table update
+CREATE TRIGGER set_timestamp
+BEFORE UPDATE ON filters
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
