@@ -317,6 +317,49 @@ func (ns NullGettingPersonalPromptType) Value() (driver.Value, error) {
 	return string(ns.GettingPersonalPromptType), nil
 }
 
+// Distinguishes standard likes from premium interactions like Roses.
+type LikeInteractionType string
+
+const (
+	LikeInteractionTypeStandard LikeInteractionType = "standard"
+	LikeInteractionTypeRose     LikeInteractionType = "rose"
+)
+
+func (e *LikeInteractionType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = LikeInteractionType(s)
+	case string:
+		*e = LikeInteractionType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for LikeInteractionType: %T", src)
+	}
+	return nil
+}
+
+type NullLikeInteractionType struct {
+	LikeInteractionType LikeInteractionType
+	Valid               bool // Valid is true if LikeInteractionType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullLikeInteractionType) Scan(value interface{}) error {
+	if value == nil {
+		ns.LikeInteractionType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.LikeInteractionType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullLikeInteractionType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.LikeInteractionType), nil
+}
+
 type MyTypePromptType string
 
 const (
@@ -366,6 +409,51 @@ func (ns NullMyTypePromptType) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.MyTypePromptType), nil
+}
+
+// Defines the types of premium features available.
+type PremiumFeatureType string
+
+const (
+	PremiumFeatureTypeUnlimitedLikes PremiumFeatureType = "unlimited_likes"
+	PremiumFeatureTypeTravelMode     PremiumFeatureType = "travel_mode"
+	PremiumFeatureTypeRose           PremiumFeatureType = "rose"
+	PremiumFeatureTypeSpotlight      PremiumFeatureType = "spotlight"
+)
+
+func (e *PremiumFeatureType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = PremiumFeatureType(s)
+	case string:
+		*e = PremiumFeatureType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for PremiumFeatureType: %T", src)
+	}
+	return nil
+}
+
+type NullPremiumFeatureType struct {
+	PremiumFeatureType PremiumFeatureType
+	Valid              bool // Valid is true if PremiumFeatureType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullPremiumFeatureType) Scan(value interface{}) error {
+	if value == nil {
+		ns.PremiumFeatureType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.PremiumFeatureType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullPremiumFeatureType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.PremiumFeatureType), nil
 }
 
 type Religion string
@@ -570,6 +658,16 @@ type DateVibesPrompt struct {
 	Answer   string
 }
 
+// Stores records of users disliking other users.
+type Dislike struct {
+	// The ID of the user performing the dislike action.
+	DislikerUserID int32
+	// The ID of the user being disliked.
+	DislikedUserID int32
+	// Timestamp when the dislike occurred.
+	CreatedAt pgtype.Timestamptz
+}
+
 type Filter struct {
 	UserID int32
 	// Which gender the user wants to see in their feed.
@@ -591,6 +689,18 @@ type GettingPersonalPrompt struct {
 	UserID   int32
 	Question GettingPersonalPromptType
 	Answer   string
+}
+
+// Stores records of users liking other users.
+type Like struct {
+	// The ID of the user performing the like action.
+	LikerUserID int32
+	// The ID of the user being liked.
+	LikedUserID int32
+	// Timestamp when the like occurred.
+	CreatedAt pgtype.Timestamptz
+	// Distinguishes standard likes from premium interactions like Roses.
+	InteractionType LikeInteractionType
 }
 
 type MyTypePrompt struct {
@@ -638,4 +748,26 @@ type User struct {
 	Role                UserRole
 	AudioPromptQuestion NullAudioPrompt
 	AudioPromptAnswer   pgtype.Text
+	// Timestamp until which the user's profile is boosted by Spotlight.
+	SpotlightActiveUntil pgtype.Timestamptz
+}
+
+// Tracks the balance of quantity-based premium items (Roses, Spotlights) for users.
+type UserConsumable struct {
+	UserID         int32
+	ConsumableType PremiumFeatureType
+	// The number of remaining items the user possesses.
+	Quantity  int32
+	UpdatedAt pgtype.Timestamptz
+}
+
+// Tracks active time-based premium features for users.
+type UserSubscription struct {
+	ID          int32
+	UserID      int32
+	FeatureType PremiumFeatureType
+	ActivatedAt pgtype.Timestamptz
+	// Timestamp when the subscription benefit ends.
+	ExpiresAt pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
 }
