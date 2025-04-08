@@ -553,6 +553,16 @@ func (ns NullVerificationStatus) Value() (driver.Value, error) {
 	return string(ns.VerificationStatus), nil
 }
 
+// Logs each time a user is considered to have opened the app (triggered by a specific API call).
+type AppOpenLog struct {
+	// Unique identifier for the log entry.
+	ID int64
+	// The ID of the user who opened the app.
+	UserID int32
+	// The timestamp when the app open event was recorded.
+	OpenedAt pgtype.Timestamptz
+}
+
 type DateVibesPrompt struct {
 	ID       int32
 	UserID   int32
