@@ -163,3 +163,22 @@ UPDATE users
 SET audio_prompt_question = $1, audio_prompt_answer = $2
 WHERE id = $3
 RETURNING id, audio_prompt_question, audio_prompt_answer;
+
+-- name: UpsertUserFilters :one
+INSERT INTO filters (
+    user_id, who_you_want_to_see, radius_km, active_today, age_min, age_max
+) VALUES (
+    $1, $2, $3, $4, $5, $6
+)
+ON CONFLICT (user_id) DO UPDATE SET
+    who_you_want_to_see = EXCLUDED.who_you_want_to_see,
+    radius_km = EXCLUDED.radius_km,
+    active_today = EXCLUDED.active_today,
+    age_min = EXCLUDED.age_min,
+    age_max = EXCLUDED.age_max,
+    updated_at = NOW()
+RETURNING *;
+
+-- name: GetUserFilters :one
+SELECT * FROM filters
+WHERE user_id = $1 LIMIT 1;

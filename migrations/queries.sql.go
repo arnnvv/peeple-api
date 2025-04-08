@@ -505,6 +505,27 @@ func (q *Queries) GetUserDateVibesPrompts(ctx context.Context, userID int32) ([]
 	return items, nil
 }
 
+const getUserFilters = `-- name: GetUserFilters :one
+SELECT user_id, who_you_want_to_see, radius_km, active_today, age_min, age_max, created_at, updated_at FROM filters
+WHERE user_id = $1 LIMIT 1
+`
+
+func (q *Queries) GetUserFilters(ctx context.Context, userID int32) (Filter, error) {
+	row := q.db.QueryRow(ctx, getUserFilters, userID)
+	var i Filter
+	err := row.Scan(
+		&i.UserID,
+		&i.WhoYouWantToSee,
+		&i.RadiusKm,
+		&i.ActiveToday,
+		&i.AgeMin,
+		&i.AgeMax,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getUserGettingPersonalPrompts = `-- name: GetUserGettingPersonalPrompts :many
 SELECT id, user_id, question, answer FROM getting_personal_prompts WHERE user_id = $1
 `
@@ -847,6 +868,54 @@ func (q *Queries) UpdateUserVerificationStatus(ctx context.Context, arg UpdateUs
 		&i.Role,
 		&i.AudioPromptQuestion,
 		&i.AudioPromptAnswer,
+	)
+	return i, err
+}
+
+const upsertUserFilters = `-- name: UpsertUserFilters :one
+INSERT INTO filters (
+    user_id, who_you_want_to_see, radius_km, active_today, age_min, age_max
+) VALUES (
+    $1, $2, $3, $4, $5, $6
+)
+ON CONFLICT (user_id) DO UPDATE SET
+    who_you_want_to_see = EXCLUDED.who_you_want_to_see,
+    radius_km = EXCLUDED.radius_km,
+    active_today = EXCLUDED.active_today,
+    age_min = EXCLUDED.age_min,
+    age_max = EXCLUDED.age_max,
+    updated_at = NOW()
+RETURNING user_id, who_you_want_to_see, radius_km, active_today, age_min, age_max, created_at, updated_at
+`
+
+type UpsertUserFiltersParams struct {
+	UserID          int32
+	WhoYouWantToSee NullGenderEnum
+	RadiusKm        pgtype.Int4
+	ActiveToday     bool
+	AgeMin          pgtype.Int4
+	AgeMax          pgtype.Int4
+}
+
+func (q *Queries) UpsertUserFilters(ctx context.Context, arg UpsertUserFiltersParams) (Filter, error) {
+	row := q.db.QueryRow(ctx, upsertUserFilters,
+		arg.UserID,
+		arg.WhoYouWantToSee,
+		arg.RadiusKm,
+		arg.ActiveToday,
+		arg.AgeMin,
+		arg.AgeMax,
+	)
+	var i Filter
+	err := row.Scan(
+		&i.UserID,
+		&i.WhoYouWantToSee,
+		&i.RadiusKm,
+		&i.ActiveToday,
+		&i.AgeMin,
+		&i.AgeMax,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
