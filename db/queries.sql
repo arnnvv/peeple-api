@@ -182,3 +182,7 @@ RETURNING *;
 -- name: GetUserFilters :one
 SELECT * FROM filters
 WHERE user_id = $1 LIMIT 1;
+
+-- name: LogAppOpen :exec
+INSERT INTO app_open_logs (user_id)
+VALUES ($1);
