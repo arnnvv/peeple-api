@@ -250,3 +250,18 @@ CREATE TRIGGER set_timestamp
 BEFORE UPDATE ON filters
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
+
+-- Table to log app open events
+CREATE TABLE app_open_logs (
+    id BIGSERIAL PRIMARY KEY, -- Use BIGSERIAL for potentially high volume
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    opened_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE app_open_logs IS 'Logs each time a user is considered to have opened the app (triggered by a specific API call).';
+COMMENT ON COLUMN app_open_logs.id IS 'Unique identifier for the log entry.';
+COMMENT ON COLUMN app_open_logs.user_id IS 'The ID of the user who opened the app.';
+COMMENT ON COLUMN app_open_logs.opened_at IS 'The timestamp when the app open event was recorded.';
+
+-- Index for potential analysis of user activity over time
+CREATE INDEX idx_app_open_logs_user_time ON app_open_logs (user_id, opened_at DESC);

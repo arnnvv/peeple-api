@@ -613,6 +613,16 @@ func (q *Queries) GetUserStoryTimePrompts(ctx context.Context, userID int32) ([]
 	return items, nil
 }
 
+const logAppOpen = `-- name: LogAppOpen :exec
+INSERT INTO app_open_logs (user_id)
+VALUES ($1)
+`
+
+func (q *Queries) LogAppOpen(ctx context.Context, userID int32) error {
+	_, err := q.db.Exec(ctx, logAppOpen, userID)
+	return err
+}
+
 const updateAudioPrompt = `-- name: UpdateAudioPrompt :one
 UPDATE users
 SET audio_prompt_question = $1, audio_prompt_answer = $2
