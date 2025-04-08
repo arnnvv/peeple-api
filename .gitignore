@@ -1,5 +1,2 @@
 api
 .env
-digest.txt
-Dockerfile
-.gitignore

@@ -37,8 +37,8 @@ func main() {
 	http.HandleFunc("/api/set-admin", token.AdminAuthMiddleware(handlers.SetAdminHandler))
 	http.HandleFunc("/api/admin/verifications", token.AdminAuthMiddleware(handlers.GetPendingVerificationsHandler))
 	http.HandleFunc("/api/admin/verify", token.AdminAuthMiddleware(handlers.UpdateVerificationStatusHandler))
-	http.HandleFunc("/api/filters", token.AuthMiddleware(handlers.ApplyFiltersHandler))  // <-- ADDED ROUTE
-	http.HandleFunc("/api/app-opened", token.AuthMiddleware(handlers.LogAppOpenHandler)) // <-- ADDED ROUTE
+	http.HandleFunc("/api/filters", token.AuthMiddleware(handlers.ApplyFiltersHandler))
+	http.HandleFunc("/api/app-opened", token.AuthMiddleware(handlers.LogAppOpenHandler))
 	http.HandleFunc("/test", handlers.TestHandler)
 
 	go cleanupExpiredOTPs()

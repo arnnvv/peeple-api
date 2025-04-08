@@ -1,6 +1,7 @@
 api
 .env
 .git/
+assets/
 .github
 .gitignore
 .env.example
