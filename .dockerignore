@@ -1,3 +1,4 @@
+db/
 api
 .env
 .git/

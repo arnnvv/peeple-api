@@ -53,6 +53,7 @@ func main() {
 	http.HandleFunc("/api/like", token.AuthMiddleware(handlers.LikeHandler))
 	http.HandleFunc("/api/dislike", token.AuthMiddleware(handlers.DislikeHandler))
 	http.HandleFunc("/api/iap/verify", token.AuthMiddleware(handlers.VerifyPurchaseHandler))
+	http.HandleFunc("/chat", handlers.ChatHandler)
 	// -----------------------------------
 
 	go cleanupExpiredOTPs()
