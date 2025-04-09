@@ -17,22 +17,20 @@ func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 	port := os.Getenv("PORT")
 
-	// Initialize DB connection pool
 	if err := db.InitDB(); err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
-	defer db.CloseDB() // Ensure pool is closed on shutdown
+	defer db.CloseDB()
 
 	server := &http.Server{
 		Addr:              ":" + port,
-		ReadHeaderTimeout: 5 * time.Second,  // Slightly increased
-		WriteTimeout:      10 * time.Second, // Slightly increased for DB ops
-		IdleTimeout:       60 * time.Second, // Slightly increased
+		ReadHeaderTimeout: 5 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
-	// --- Existing Routes ---
 	http.HandleFunc("/", token.AuthMiddleware(handlers.ProtectedHandler))
-	http.HandleFunc("/token", token.GenerateTokenHandler) // Should this be protected?
+	http.HandleFunc("/token", token.GenerateTokenHandler)
 	http.HandleFunc("/upload", token.AuthMiddleware(handlers.GeneratePresignedURLs))
 	http.HandleFunc("/audio", token.AuthMiddleware(handlers.GenerateAudioPresignedURL))
 	http.HandleFunc("/get-profile", token.AuthMiddleware(handlers.ProfileHandler))
@@ -47,14 +45,12 @@ func main() {
 	http.HandleFunc("/api/filters", token.AuthMiddleware(handlers.ApplyFiltersHandler))
 	http.HandleFunc("/api/app-opened", token.AuthMiddleware(handlers.LogAppOpenHandler))
 	http.HandleFunc("/api/homefeed", token.AuthMiddleware(handlers.GetHomeFeedHandler))
-	http.HandleFunc("/test", handlers.TestHandler) // Keep for basic testing
+	http.HandleFunc("/test", handlers.TestHandler)
 
-	// --- ADDED LIKE/DISLIKE ROUTES ---
 	http.HandleFunc("/api/like", token.AuthMiddleware(handlers.LikeHandler))
 	http.HandleFunc("/api/dislike", token.AuthMiddleware(handlers.DislikeHandler))
 	http.HandleFunc("/api/iap/verify", token.AuthMiddleware(handlers.VerifyPurchaseHandler))
 	http.HandleFunc("/chat", handlers.ChatHandler)
-	// -----------------------------------
 
 	go cleanupExpiredOTPs()
 
@@ -65,7 +61,6 @@ func main() {
 }
 
 func cleanupExpiredOTPs() {
-	// Ensure DB is ready before starting ticker
 	for db.GetDB() == nil {
 		log.Println("Waiting for DB initialization before starting OTP cleanup...")
 		time.Sleep(2 * time.Second)
@@ -76,7 +71,6 @@ func cleanupExpiredOTPs() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		// Use GetDB inside the loop to handle potential reconnections
 		queries := db.GetDB()
 		if queries != nil {
 			log.Println("Running OTP cleanup...")

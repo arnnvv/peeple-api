@@ -37,7 +37,6 @@ func SetAdminHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// --- Decode Body ---
 	var req SetAdminRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		log.Printf("SetAdminHandler: Error decoding request body: %v", err)
@@ -45,7 +44,7 @@ func SetAdminHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(ErrorResponse{Success: false, Message: "Invalid request body format"})
 		return
 	}
-	defer r.Body.Close() // closinbg the body
+	defer r.Body.Close()
 
 	if req.PhoneNumber == "" {
 		w.WriteHeader(http.StatusBadRequest)
@@ -77,9 +76,7 @@ func SetAdminHandler(w http.ResponseWriter, r *http.Request) {
 		targetRole = migrations.UserRoleUser
 	}
 
-	// 3. Update the user's role
 	if user.Role == targetRole {
-		// Role is already set, maybe return success or a specific message
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(SetAdminResponse{
 			Success: true,
