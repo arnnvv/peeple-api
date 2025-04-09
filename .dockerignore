@@ -3,6 +3,8 @@ api
 .env
 .git/
 assets/
-.github
+.github/
+sqlc.yml
 .gitignore
 .env.example
+seed_test_data.sql
