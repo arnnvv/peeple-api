@@ -291,3 +291,34 @@ DO NOTHING
 RETURNING *;
 
 -- Removed Check...Exists queries as validation moves to Go code
+
+-- db/queries.sql
+
+-- ... (keep existing queries) ...
+
+-- name: GetLikersForUser :many
+-- Fetches basic details of users who liked a specific user, ordered by Rose and then time.
+SELECT
+    l.liker_user_id,
+    l.comment,
+    l.interaction_type,
+    l.created_at as liked_at,
+    u.name,
+    u.last_name,
+    u.media_urls
+FROM likes l
+JOIN users u ON l.liker_user_id = u.id
+WHERE l.liked_user_id = $1 -- The user receiving the likes (current user)
+ORDER BY
+    (l.interaction_type = 'rose') DESC, -- Roses first
+    l.created_at DESC;                  -- Then by time
+
+-- name: GetLikeDetails :one
+-- Fetches specific details of a single like interaction.
+SELECT
+    comment,
+    interaction_type
+FROM likes
+WHERE liker_user_id = $1 -- The user who sent the like
+AND liked_user_id = $2   -- The user who received the like (current user)
+LIMIT 1;

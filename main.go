@@ -53,6 +53,8 @@ func main() {
 	http.HandleFunc("/api/like", token.AuthMiddleware(handlers.LikeHandler))
 	http.HandleFunc("/api/dislike", token.AuthMiddleware(handlers.DislikeHandler))
 	http.HandleFunc("/api/iap/verify", token.AuthMiddleware(handlers.VerifyPurchaseHandler))
+	http.HandleFunc("/api/liker-profile/", token.AuthMiddleware(handlers.GetLikerProfileHandler)) // Matches /api/liker-profile/ANYTHING
+	http.HandleFunc("/api/likes/received", token.AuthMiddleware(handlers.GetWhoLikedYouHandler))
 	// -----------------------------------
 
 	go cleanupExpiredOTPs()

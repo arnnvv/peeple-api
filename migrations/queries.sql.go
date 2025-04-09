@@ -602,6 +602,98 @@ func (q *Queries) GetHomeFeed(ctx context.Context, arg GetHomeFeedParams) ([]Get
 	return items, nil
 }
 
+const getLikeDetails = `-- name: GetLikeDetails :one
+
+SELECT
+    comment,
+    interaction_type
+FROM likes
+WHERE liker_user_id = $1 -- The user who sent the like
+AND liked_user_id = $2   -- The user who received the like (current user)
+LIMIT 1
+`
+
+type GetLikeDetailsParams struct {
+	LikerUserID int32
+	LikedUserID int32
+}
+
+type GetLikeDetailsRow struct {
+	Comment         pgtype.Text
+	InteractionType LikeInteractionType
+}
+
+// Then by time
+// Fetches specific details of a single like interaction.
+func (q *Queries) GetLikeDetails(ctx context.Context, arg GetLikeDetailsParams) (GetLikeDetailsRow, error) {
+	row := q.db.QueryRow(ctx, getLikeDetails, arg.LikerUserID, arg.LikedUserID)
+	var i GetLikeDetailsRow
+	err := row.Scan(&i.Comment, &i.InteractionType)
+	return i, err
+}
+
+const getLikersForUser = `-- name: GetLikersForUser :many
+
+
+
+SELECT
+    l.liker_user_id,
+    l.comment,
+    l.interaction_type,
+    l.created_at as liked_at,
+    u.name,
+    u.last_name,
+    u.media_urls
+FROM likes l
+JOIN users u ON l.liker_user_id = u.id
+WHERE l.liked_user_id = $1 -- The user receiving the likes (current user)
+ORDER BY
+    (l.interaction_type = 'rose') DESC, -- Roses first
+    l.created_at DESC
+`
+
+type GetLikersForUserRow struct {
+	LikerUserID     int32
+	Comment         pgtype.Text
+	InteractionType LikeInteractionType
+	LikedAt         pgtype.Timestamptz
+	Name            pgtype.Text
+	LastName        pgtype.Text
+	MediaUrls       []string
+}
+
+// Removed Check...Exists queries as validation moves to Go code
+// db/queries.sql
+// ... (keep existing queries) ...
+// Fetches basic details of users who liked a specific user, ordered by Rose and then time.
+func (q *Queries) GetLikersForUser(ctx context.Context, likedUserID int32) ([]GetLikersForUserRow, error) {
+	rows, err := q.db.Query(ctx, getLikersForUser, likedUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetLikersForUserRow
+	for rows.Next() {
+		var i GetLikersForUserRow
+		if err := rows.Scan(
+			&i.LikerUserID,
+			&i.Comment,
+			&i.InteractionType,
+			&i.LikedAt,
+			&i.Name,
+			&i.LastName,
+			&i.MediaUrls,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getOTPByUser = `-- name: GetOTPByUser :one
 SELECT id, user_id, otp_code, expires_at FROM otps
 WHERE user_id = $1

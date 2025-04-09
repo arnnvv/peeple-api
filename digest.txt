@@ -25,10 +25,13 @@ Directory structure:
     │   │   ├── audio.go
     │   │   ├── checkauthstatus.go
     │   │   ├── createprofile.go
+    │   │   ├── dislikeHandler.go
     │   │   ├── filtersHandler.go
     │   │   ├── getPendingVerification.go
     │   │   ├── homeFeedHandler.go
+    │   │   ├── iapHandler.go
     │   │   ├── imagehandler.go
+    │   │   ├── likeHandler.go
     │   │   ├── newuser.go
     │   │   ├── profileHandler.go
     │   │   ├── protectedHandler.go
@@ -160,15 +163,22 @@ func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 	port := os.Getenv("PORT")
 
+	// Initialize DB connection pool
+	if err := db.InitDB(); err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
+	}
+	defer db.CloseDB() // Ensure pool is closed on shutdown
+
 	server := &http.Server{
 		Addr:              ":" + port,
-		ReadHeaderTimeout: 2 * time.Second,
-		WriteTimeout:      5 * time.Second,
-		IdleTimeout:       30 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,  // Slightly increased
+		WriteTimeout:      10 * time.Second, // Slightly increased for DB ops
+		IdleTimeout:       60 * time.Second, // Slightly increased
 	}
 
+	// --- Existing Routes ---
 	http.HandleFunc("/", token.AuthMiddleware(handlers.ProtectedHandler))
-	http.HandleFunc("/token", token.GenerateTokenHandler)
+	http.HandleFunc("/token", token.GenerateTokenHandler) // Should this be protected?
 	http.HandleFunc("/upload", token.AuthMiddleware(handlers.GeneratePresignedURLs))
 	http.HandleFunc("/audio", token.AuthMiddleware(handlers.GenerateAudioPresignedURL))
 	http.HandleFunc("/get-profile", token.AuthMiddleware(handlers.ProfileHandler))
@@ -182,8 +192,14 @@ func main() {
 	http.HandleFunc("/api/admin/verify", token.AdminAuthMiddleware(handlers.UpdateVerificationStatusHandler))
 	http.HandleFunc("/api/filters", token.AuthMiddleware(handlers.ApplyFiltersHandler))
 	http.HandleFunc("/api/app-opened", token.AuthMiddleware(handlers.LogAppOpenHandler))
-	http.HandleFunc("/api/homefeed", token.AuthMiddleware(handlers.GetHomeFeedHandler)) // <-- ADDED ROUTE
-	http.HandleFunc("/test", handlers.TestHandler)
+	http.HandleFunc("/api/homefeed", token.AuthMiddleware(handlers.GetHomeFeedHandler))
+	http.HandleFunc("/test", handlers.TestHandler) // Keep for basic testing
+
+	// --- ADDED LIKE/DISLIKE ROUTES ---
+	http.HandleFunc("/api/like", token.AuthMiddleware(handlers.LikeHandler))
+	http.HandleFunc("/api/dislike", token.AuthMiddleware(handlers.DislikeHandler))
+	http.HandleFunc("/api/iap/verify", token.AuthMiddleware(handlers.VerifyPurchaseHandler))
+	// -----------------------------------
 
 	go cleanupExpiredOTPs()
 
@@ -194,11 +210,30 @@ func main() {
 }
 
 func cleanupExpiredOTPs() {
+	// Ensure DB is ready before starting ticker
+	for db.GetDB() == nil {
+		log.Println("Waiting for DB initialization before starting OTP cleanup...")
+		time.Sleep(2 * time.Second)
+	}
+	log.Println("DB initialized, starting OTP cleanup routine.")
+
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		db.GetDB().CleanOTPs(context.Background())
+		// Use GetDB inside the loop to handle potential reconnections
+		queries := db.GetDB()
+		if queries != nil {
+			log.Println("Running OTP cleanup...")
+			err := queries.CleanOTPs(context.Background())
+			if err != nil {
+				log.Printf("Error during OTP cleanup: %v", err)
+			} else {
+				log.Println("OTP cleanup finished.")
+			}
+		} else {
+			log.Println("Skipping OTP cleanup run, DB connection not available.")
+		}
 	}
 }
 
@@ -208,7 +243,7 @@ func cleanupExpiredOTPs() {
 File: seed_test_data.sql
 ================================================
 -- ====================================================================
--- Peeple API Test Data Seeding Script
+-- Peeple API Test Data Seeding Script (with Premium & Content Likes)
 -- ====================================================================
 
 -- Start Transaction
@@ -220,6 +255,8 @@ TRUNCATE TABLE likes CASCADE;
 TRUNCATE TABLE dislikes CASCADE;
 TRUNCATE TABLE app_open_logs CASCADE;
 TRUNCATE TABLE filters CASCADE;
+TRUNCATE TABLE user_subscriptions CASCADE; -- Added previously
+TRUNCATE TABLE user_consumables CASCADE;   -- Added previously
 -- Delete specific user range or TRUNCATE users if acceptable for testing
 DELETE FROM users WHERE id BETWEEN 1 AND 20;
 
@@ -227,15 +264,17 @@ DELETE FROM users WHERE id BETWEEN 1 AND 20;
 -- Adjust sequence names if they differ ('public.' prefix might be needed sometimes)
 SELECT setval(pg_get_serial_sequence('users', 'id'), COALESCE((SELECT MAX(id) FROM users), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('app_open_logs', 'id'), COALESCE((SELECT MAX(id) FROM app_open_logs), 0) + 1, false);
+SELECT setval(pg_get_serial_sequence('user_subscriptions', 'id'), COALESCE((SELECT MAX(id) FROM user_subscriptions), 0) + 1, false);
+SELECT setval(pg_get_serial_sequence('likes', 'id'), COALESCE((SELECT MAX(id) FROM likes), 0) + 1, false); -- Reset new likes PK sequence
 
 
--- Insert Test Users (Corrected multi-row INSERT syntax)
+-- Insert Test Users
 INSERT INTO users (id, name, phone_number, gender, date_of_birth, latitude, longitude, media_urls, created_at) VALUES
-    (1, 'Alice', '1110000001', 'woman',   '1995-05-15', 40.7128, -74.0060, '{"img_alice1.jpg", "vid_alice1.mp4"}', NOW() - INTERVAL '10 days'),
+    (1, 'Alice', '1110000001', 'woman',   '1995-05-15', 40.7128, -74.0060, '{"img_alice1.jpg", "vid_alice1.mp4", "img_alice2.png"}', NOW() - INTERVAL '10 days'), -- Added 3 media items
     (2, 'Bob',   '1110000002', 'man',     '1993-08-20', 40.7135, -74.0050, '{"img_bob1.jpg"}', NOW() - INTERVAL '5 days'),
     (3, 'Charlie','1110000003', 'man',     '1997-01-10', 40.7580, -73.9855, '{"img_charlie1.jpg"}', NOW() - INTERVAL '8 days'),
     (4, 'David', '1110000004', 'man',     '1994-11-05', 34.0522, -118.2437,'{"img_david1.jpg"}', NOW() - INTERVAL '12 days'),
-    (5, 'Eve',   '1110000005', 'woman',   '1996-03-25', 40.7120, -74.0070, '{"img_eve1.jpg"}', NOW() - INTERVAL '3 days'),
+    (5, 'Eve',   '1110000005', 'woman',   '1996-03-25', 40.7120, -74.0070, '{"img_eve1.jpg", "img_eve2.jpg"}', NOW() - INTERVAL '3 days'), -- Added 2 media items
     (6, 'Frank', '1110000006', 'man',     '1987-07-12', 40.7140, -74.0045, '{"img_frank1.jpg"}', NOW() - INTERVAL '20 days'),
     (7, 'Grace', '1110000007', 'man',     '1996-09-30', 40.7130, -74.0065, '{"img_grace1.jpg"}', NOW() - INTERVAL '6 days'),
     (8, 'Hank',  '1110000008', 'man',     '1994-06-18', 40.7125, -74.0055, '{"img_hank1.jpg"}', NOW() - INTERVAL '15 days'),
@@ -243,72 +282,52 @@ INSERT INTO users (id, name, phone_number, gender, date_of_birth, latitude, long
     (10,'Jack',  '1110000010', 'man',     '1991-02-01', 40.7138, -74.0052, '{"img_jack1.jpg"}', NOW() - INTERVAL '25 days'),
     (11,'Ken',   '1110000011', 'man',     '1996-04-14', 40.7129, -74.0062, '{"img_ken1.jpg"}', NOW() - INTERVAL '9 days'),
     (12,'Liam',  '1110000012', 'man',     '1995-01-05', 40.7127, -74.0061, '{"img_liam1.jpg"}', NOW() - INTERVAL '2 days'),
-    (13,'Mia',   '1110000013', 'man',     '1999-10-10', 40.7133, -74.0058, '{}', NOW() - INTERVAL '4 days'),
+    (13,'Mia',   '1110000013', 'man',     '1999-10-10', 40.7133, -74.0058, '{}', NOW() - INTERVAL '4 days'), -- No media
     (14,'Noah',  '1110000014', 'man',     '1990-03-15', 40.7142, -74.0040, '{"img_noah1.jpg"}', NOW() - INTERVAL '30 days'),
     (15,'Olivia','1110000015', 'man',     '1993-07-20', 40.7122, -74.0068, '{"img_olivia1.jpg"}', NOW() - INTERVAL '1 day'),
     (16,'Peter', '1110000016', 'man',     '1994-08-25', 40.7100, -74.0100, '{"img_peter1.jpg"}', NOW() - INTERVAL '7 days'),
     (17,'Quinn', '1110000017', 'man',     '1995-09-01', 40.6892, -74.0445, '{"img_quinn1.jpg"}', NOW() - INTERVAL '11 days');
 
-
--- Insert Filters (Using multiple INSERT statements is fine too)
+-- Insert Filters
 INSERT INTO filters (user_id, who_you_want_to_see, radius_km, active_today, age_min, age_max) VALUES
-    (1, 'man', 20, true, 28, 36),
-    (2, 'woman', 50, false, 28, 38),
-    (3, 'woman', NULL, true, 25, 35),
-    (4, 'woman', 100, true, 25, 40),
-    -- Eve (5) - No filter needed for test
-    (6, 'woman', 30, false, 30, 45),
-    (7, 'man', 30, true, 25, 35),
-    (8, 'woman', 40, true, 25, 35),
-    (9, 'woman', 50, false, 28, 38),
-    (10,'woman', 60, true, 29, 39),
-    (11,'woman', 25, false, 25, 33),
-    (12,'woman', 15, true, 26, 34),
-    (13,'woman', NULL, true, 22, 30),
-    (14,'woman', 20, true, 30, 40),
-    (15,'woman', 25, true, 27, 35),
-    -- Peter (16) - No filters
-    (17,'woman', 50, true, 26, 36);
-
+    (1, 'man', 20, true, 28, 36), (2, 'woman', 50, false, 28, 38), (3, 'woman', NULL, true, 25, 35),
+    (4, 'woman', 100, true, 25, 40), (6, 'woman', 30, false, 30, 45), (7, 'man', 30, true, 25, 35),
+    (8, 'woman', 40, true, 25, 35), (9, 'woman', 50, false, 28, 38), (10,'woman', 60, true, 29, 39),
+    (11,'woman', 25, false, 25, 33), (12,'woman', 15, true, 26, 34), (13,'woman', NULL, true, 22, 30),
+    (14,'woman', 20, true, 30, 40), (15,'woman', 25, true, 27, 35), (17,'woman', 50, true, 26, 36);
 
 -- Insert App Open Logs
 INSERT INTO app_open_logs (user_id, opened_at) VALUES
-    (2, NOW()),
-    (3, NOW() - INTERVAL '5 hour'),
-    (4, NOW()),
-    (6, NOW() - INTERVAL '10 minute'),
-    (7, NOW()),
-    (8, NOW() - INTERVAL '1 hour'),
-    (9, NOW()),
-    (10, NOW() - INTERVAL '2 hour'),
-    (11, NOW() - INTERVAL '3 day'), -- Ken INACTIVE
-    (12, NOW() - INTERVAL '5 minute'),
-    (13, NOW()),
-    (14, NOW() - INTERVAL '1 day'), -- Noah INACTIVE
-    (15, NOW() - INTERVAL '30 minute'),
-    (16, NOW()),
-    (17, NOW() - INTERVAL '6 hour');
+    (2, NOW()), (3, NOW() - INTERVAL '5 hour'), (4, NOW()), (6, NOW() - INTERVAL '10 minute'),
+    (7, NOW()), (8, NOW() - INTERVAL '1 hour'), (9, NOW()), (10, NOW() - INTERVAL '2 hour'),
+    (11, NOW() - INTERVAL '3 day'), (12, NOW() - INTERVAL '5 minute'), (13, NOW()),
+    (14, NOW() - INTERVAL '1 day'), (15, NOW() - INTERVAL '30 minute'), (16, NOW()), (17, NOW() - INTERVAL '6 hour');
 
+-- Setup Premium Features
+INSERT INTO user_subscriptions (user_id, feature_type, expires_at) VALUES
+    (2, 'unlimited_likes', NOW() + INTERVAL '7 days');
+INSERT INTO user_consumables (user_id, consumable_type, quantity) VALUES
+    (3, 'rose', 5);
 
--- Insert Likes FROM Alice (ID 1)
-INSERT INTO likes (liker_user_id, liked_user_id) VALUES
-    (1, 8);  -- Alice liked Hank
-
+-- *** UPDATED Seed Like Data ***
+-- Alice (ID 1) liked Bob's (ID 2) first photo (index 0) with a comment
+INSERT INTO likes (liker_user_id, liked_user_id, content_type, content_identifier, comment, interaction_type) VALUES
+    (1, 2, 'media', '0', 'Great pic!', 'standard'); -- Identifier is "0" for the first media item
 
 -- Insert Dislikes involving Alice (ID 1)
 INSERT INTO dislikes (disliker_user_id, disliked_user_id) VALUES
     (1, 9),   -- Alice disliked Ivy
     (10, 1);  -- Jack disliked Alice
 
-
 -- Commit Transaction
 COMMIT;
 
 -- Optional: Query to verify data after running
--- SELECT u.id, u.name, f.who_you_want_to_see, f.radius_km, f.active_today, f.age_min, f.age_max FROM users u LEFT JOIN filters f ON u.id = f.user_id WHERE u.id BETWEEN 1 AND 20 ORDER BY u.id;
--- SELECT * FROM app_open_logs WHERE user_id BETWEEN 1 AND 20 ORDER BY user_id, opened_at DESC;
--- SELECT * FROM likes WHERE liker_user_id = 1 OR liked_user_id = 1;
--- SELECT * FROM dislikes WHERE disliker_user_id = 1 OR disliked_user_id = 1;
+-- SELECT u.id, u.name, u.media_urls FROM users u WHERE u.id BETWEEN 1 AND 20 ORDER BY u.id;
+-- SELECT * FROM likes;
+-- SELECT * FROM dislikes;
+-- SELECT * FROM user_subscriptions;
+-- SELECT * FROM user_consumables;
 
 
 
@@ -548,83 +567,120 @@ INSERT INTO app_open_logs (user_id)
 VALUES ($1);
 
 -- name: AddDislike :exec
--- name: AddDislike :exec
 INSERT INTO dislikes (disliker_user_id, disliked_user_id)
 VALUES ($1, $2)
 ON CONFLICT (disliker_user_id, disliked_user_id) DO NOTHING;
 
--- name: AddLike :exec
-INSERT INTO likes (liker_user_id, liked_user_id)
-VALUES ($1, $2)
-ON CONFLICT (liker_user_id, liked_user_id) DO NOTHING; -- Ignore if like already exists
+-- name: GetActiveSubscription :one
+SELECT * FROM user_subscriptions
+WHERE user_id = $1
+  AND feature_type = $2 -- e.g., 'unlimited_likes'
+  AND expires_at > NOW()
+LIMIT 1;
+
+-- name: GetUserConsumable :one
+SELECT * FROM user_consumables
+WHERE user_id = $1
+  AND consumable_type = $2; -- e.g., 'rose'
+
+-- name: DecrementUserConsumable :one
+UPDATE user_consumables
+SET quantity = quantity - 1,
+    updated_at = NOW()
+WHERE user_id = $1
+  AND consumable_type = $2 -- e.g., 'rose'
+  AND quantity > 0
+RETURNING *;
+
+-- name: UpsertUserConsumable :one
+INSERT INTO user_consumables (user_id, consumable_type, quantity)
+VALUES ($1, $2, $3) -- $3 is the quantity to add
+ON CONFLICT (user_id, consumable_type) DO UPDATE
+SET quantity = user_consumables.quantity + EXCLUDED.quantity,
+    updated_at = NOW()
+RETURNING *;
+
+-- name: CountRecentStandardLikes :one
+SELECT COUNT(*) FROM likes
+WHERE liker_user_id = $1
+  AND interaction_type = 'standard'
+  AND created_at >= NOW() - INTERVAL '24 hours';
 
 -- name: GetHomeFeed :many
 WITH RequestingUser AS (
     SELECT
-        u.id,
-        u.latitude,
-        u.longitude,
-        u.gender,
-        u.date_of_birth
-    FROM users u
-    WHERE u.id = $1 -- requesting_user_id
+        u.id, u.latitude, u.longitude, u.gender, u.date_of_birth, u.spotlight_active_until
+    FROM users u WHERE u.id = $1
 ), RequestingUserFilters AS (
     SELECT
-        f.user_id,
-        f.who_you_want_to_see,
-        f.radius_km,
-        f.active_today,
-        f.age_min,
-        f.age_max
-    FROM filters f
-    WHERE f.user_id = $1 -- requesting_user_id
+        f.user_id, f.who_you_want_to_see, f.radius_km, f.active_today, f.age_min, f.age_max
+    FROM filters f WHERE f.user_id = $1
 )
 SELECT
-    target_user.id, target_user.created_at, target_user.name, target_user.last_name, target_user.phone_number, target_user.date_of_birth, target_user.latitude, target_user.longitude, target_user.gender, target_user.dating_intention, target_user.height, target_user.hometown, target_user.job_title, target_user.education, target_user.religious_beliefs, target_user.drinking_habit, target_user.smoking_habit, target_user.media_urls, target_user.verification_status, target_user.verification_pic, target_user.role, target_user.audio_prompt_question, target_user.audio_prompt_answer,
+    target_user.*,
     haversine(ru.latitude, ru.longitude, target_user.latitude, target_user.longitude) AS distance_km
 FROM users AS target_user
-JOIN RequestingUser ru ON target_user.id != ru.id -- Don't show self
-JOIN RequestingUserFilters rf ON ru.id = rf.user_id -- Ensure requesting user has filters (or defaults were just created)
-LEFT JOIN filters AS target_user_filters ON target_user.id = target_user_filters.user_id -- Filters of the potential match
+JOIN RequestingUser ru ON target_user.id != ru.id
+JOIN RequestingUserFilters rf ON ru.id = rf.user_id
+LEFT JOIN filters AS target_user_filters ON target_user.id = target_user_filters.user_id
 WHERE
-    -- Location Check: target user must have location
     target_user.latitude IS NOT NULL AND target_user.longitude IS NOT NULL
-    -- Radius Check: target user must be within radius OR radius filter is not set
     AND (rf.radius_km IS NULL OR haversine(ru.latitude, ru.longitude, target_user.latitude, target_user.longitude) <= rf.radius_km)
-
-    -- Gender Preference Check (Requesting User's Preference)
     AND target_user.gender = rf.who_you_want_to_see
-
-    -- Gender Preference Check (Target User's Preference - Reciprocal)
-    AND target_user_filters.who_you_want_to_see = ru.gender
-
-    -- Age Check: target user's age must be within requesting user's filter range
+    AND (target_user_filters.user_id IS NULL OR target_user_filters.who_you_want_to_see IS NULL OR target_user_filters.who_you_want_to_see = ru.gender)
     AND target_user.date_of_birth IS NOT NULL
     AND EXTRACT(YEAR FROM AGE(target_user.date_of_birth)) BETWEEN rf.age_min AND rf.age_max
-
-    -- Active Today Check (only if filter is enabled)
     AND (NOT rf.active_today OR EXISTS (
             SELECT 1 FROM app_open_logs aol
             WHERE aol.user_id = target_user.id AND aol.opened_at >= NOW() - INTERVAL '24 hours'
         ))
-
-    -- Dislike Checks (Neither user disliked the other)
     AND NOT EXISTS (SELECT 1 FROM dislikes d WHERE d.disliker_user_id = ru.id AND d.disliked_user_id = target_user.id)
     AND NOT EXISTS (SELECT 1 FROM dislikes d WHERE d.disliker_user_id = target_user.id AND d.disliked_user_id = ru.id)
-
-    -- Like Check (Requesting user has NOT liked the target user)
-    AND NOT EXISTS (SELECT 1 FROM likes l WHERE l.liker_user_id = ru.id AND l.liked_user_id = target_user.id) -- <-- ADDED like check
-
+    AND NOT EXISTS (SELECT 1 FROM likes l WHERE l.liker_user_id = ru.id AND l.liked_user_id = target_user.id)
 ORDER BY
-    distance_km ASC, -- Primary sort: Closest first
+    CASE WHEN target_user.spotlight_active_until > NOW() THEN 0 ELSE 1 END ASC,
+    distance_km ASC,
     ABS(EXTRACT(YEAR FROM AGE(ru.date_of_birth)) - EXTRACT(YEAR FROM AGE(target_user.date_of_birth))) ASC NULLS LAST
-LIMIT $2; -- page_size (e.g., 15) -- Only Limit ($2), no Offset ($3)
+LIMIT $2;
+
+-- name: AddUserSubscription :one
+INSERT INTO user_subscriptions (
+    user_id, feature_type, expires_at, activated_at
+) VALUES (
+    $1, $2, $3, NOW()
+)
+RETURNING *;
+
+-- name: AddContentLike :one
+-- Inserts a like for a specific content item, potentially with a comment.
+-- content_identifier is TEXT type in the DB.
+INSERT INTO likes (
+    liker_user_id,
+    liked_user_id,
+    content_type,
+    content_identifier,
+    comment,
+    interaction_type
+) VALUES (
+    $1, $2, $3, $4, $5, $6
+)
+-- Prevent duplicate likes on the exact same item
+ON CONFLICT (liker_user_id, liked_user_id, content_type, content_identifier)
+DO NOTHING
+RETURNING *;
+
+-- Removed Check...Exists queries as validation moves to Go code
 
 
 
 ================================================
 File: db/schema.sql
 ================================================
+-- =============================================
+-- START: Original Schema Definitions (Types First)
+-- =============================================
+
+-- Original ENUM Types
 CREATE TYPE gender_enum AS ENUM (
     'man',
     'woman',
@@ -632,7 +688,6 @@ CREATE TYPE gender_enum AS ENUM (
     'lesbian',
     'bisexual'
 );
-
 COMMENT ON TYPE gender_enum IS 'Enumerated type for representing gender identity and/or sexual orientation as specified.';
 
 CREATE TYPE dating_intention AS ENUM (
@@ -665,89 +720,39 @@ CREATE TYPE drinking_smoking_habits AS ENUM (
 );
 
 CREATE TYPE story_time_prompt_type AS ENUM (
-    'twoTruthsAndALie',
-    'worstIdea',
-    'biggestRisk',
-    'biggestDateFail',
-    'neverHaveIEver',
-    'bestTravelStory',
-    'weirdestGift',
-    'mostSpontaneous',
+    'twoTruthsAndALie', 'worstIdea', 'biggestRisk', 'biggestDateFail',
+    'neverHaveIEver', 'bestTravelStory', 'weirdestGift', 'mostSpontaneous',
     'oneThingNeverDoAgain'
 );
 
 CREATE TYPE my_type_prompt_type AS ENUM (
-    'nonNegotiable',
-    'hallmarkOfGoodRelationship',
-    'lookingFor',
-    'weirdlyAttractedTo',
-    'allIAskIsThatYou',
-    'wellGetAlongIf',
-    'wantSomeoneWho',
-    'greenFlags',
-    'sameTypeOfWeird',
-    'fallForYouIf',
-    'bragAboutYou'
+    'nonNegotiable', 'hallmarkOfGoodRelationship', 'lookingFor', 'weirdlyAttractedTo',
+    'allIAskIsThatYou', 'wellGetAlongIf', 'wantSomeoneWho', 'greenFlags',
+    'sameTypeOfWeird', 'fallForYouIf', 'bragAboutYou'
 );
 
 CREATE TYPE getting_personal_prompt_type AS ENUM (
-    'oneThingYouShouldKnow',
-    'loveLanguage',
-    'dorkiestThing',
-    'dontHateMeIf',
-    'geekOutOn',
-    'ifLovingThisIsWrong',
-    'keyToMyHeart',
-    'wontShutUpAbout',
-    'shouldNotGoOutWithMeIf',
-    'whatIfIToldYouThat'
+    'oneThingYouShouldKnow', 'loveLanguage', 'dorkiestThing', 'dontHateMeIf',
+    'geekOutOn', 'ifLovingThisIsWrong', 'keyToMyHeart', 'wontShutUpAbout',
+    'shouldNotGoOutWithMeIf', 'whatIfIToldYouThat'
 );
 
 CREATE TYPE date_vibes_prompt_type AS ENUM (
-    'togetherWeCould',
-    'firstRoundIsOnMeIf',
-    'whatIOrderForTheTable',
-    'bestSpotInTown',
-    'bestWayToAskMeOut'
+    'togetherWeCould', 'firstRoundIsOnMeIf', 'whatIOrderForTheTable',
+    'bestSpotInTown', 'bestWayToAskMeOut'
 );
 
 CREATE TYPE audio_prompt AS ENUM (
-    'canWeTalkAbout',
-    'captionThisPhoto',
-    'caughtInTheAct',
-    'changeMyMindAbout',
-    'chooseOurFirstDate',
-    'commentIfYouveBeenHere',
-    'cookWithMe',
-    'datingMeIsLike',
-    'datingMeWillLookLike',
-    'doYouAgreeOrDisagreeThat',
-    'dontHateMeIfI',
-    'dontJudgeMe',
-    'mondaysAmIRight',
-    'aBoundaryOfMineIs',
-    'aDailyEssential',
-    'aDreamHomeMustInclude',
-    'aFavouriteMemoryOfMine',
-    'aFriendsReviewOfMe',
-    'aLifeGoalOfMine',
-    'aQuickRantAbout',
-    'aRandomFactILoveIs',
-    'aSpecialTalentOfMine',
-    'aThoughtIRecentlyHadInTheShower',
-    'allIAskIsThatYou',
-    'guessWhereThisPhotoWasTaken',
-    'helpMeIdentifyThisPhotoBomber',
-    'hiFromMeAndMyPet',
-    'howIFightTheSundayScaries',
-    'howHistoryWillRememberMe',
-    'howMyFriendsSeeMe',
-    'howToPronounceMyName',
-    'iBeatMyBluesBy',
-    'iBetYouCant',
-    'iCanTeachYouHowTo',
-    'iFeelFamousWhen',
-    'iFeelMostSupportedWhen'
+    'canWeTalkAbout', 'captionThisPhoto', 'caughtInTheAct', 'changeMyMindAbout',
+    'chooseOurFirstDate', 'commentIfYouveBeenHere', 'cookWithMe', 'datingMeIsLike',
+    'datingMeWillLookLike', 'doYouAgreeOrDisagreeThat', 'dontHateMeIfI', 'dontJudgeMe',
+    'mondaysAmIRight', 'aBoundaryOfMineIs', 'aDailyEssential', 'aDreamHomeMustInclude',
+    'aFavouriteMemoryOfMine', 'aFriendsReviewOfMe', 'aLifeGoalOfMine', 'aQuickRantAbout',
+    'aRandomFactILoveIs', 'aSpecialTalentOfMine', 'aThoughtIRecentlyHadInTheShower',
+    'allIAskIsThatYou', 'guessWhereThisPhotoWasTaken', 'helpMeIdentifyThisPhotoBomber',
+    'hiFromMeAndMyPet', 'howIFightTheSundayScaries', 'howHistoryWillRememberMe',
+    'howMyFriendsSeeMe', 'howToPronounceMyName', 'iBeatMyBluesBy', 'iBetYouCant',
+    'iCanTeachYouHowTo', 'iFeelFamousWhen', 'iFeelMostSupportedWhen'
 );
 
 CREATE TYPE verification_status AS ENUM (
@@ -760,6 +765,37 @@ CREATE TYPE user_role AS ENUM (
     'user',
     'admin'
 );
+
+-- =============================================
+-- START: Premium & Like Feature Types
+-- =============================================
+
+CREATE TYPE premium_feature_type AS ENUM (
+    'unlimited_likes',
+    'travel_mode',
+    'rose',
+    'spotlight'
+);
+COMMENT ON TYPE premium_feature_type IS 'Defines the types of premium features available.';
+
+CREATE TYPE like_interaction_type AS ENUM ('standard', 'rose');
+COMMENT ON TYPE like_interaction_type IS 'Distinguishes standard likes from premium interactions like Roses.';
+
+-- NEW ENUM for content liking
+CREATE TYPE content_like_type AS ENUM (
+    'media',
+    'prompt_story',
+    'prompt_mytype',
+    'prompt_gettingpersonal',
+    'prompt_datevibes',
+    'audio_prompt'
+);
+COMMENT ON TYPE content_like_type IS 'Specifies the type of profile content being liked.';
+
+
+-- =============================================
+-- START: Table Definitions
+-- =============================================
 
 CREATE TABLE users (
     id SERIAL PRIMARY KEY,
@@ -784,66 +820,53 @@ CREATE TABLE users (
     verification_pic TEXT,
     role user_role NOT NULL DEFAULT 'user',
     audio_prompt_question audio_prompt,
-    audio_prompt_answer TEXT
+    audio_prompt_answer TEXT,
+    spotlight_active_until TIMESTAMPTZ NULL -- From previous step
 );
+CREATE INDEX idx_users_spotlight_active ON users (spotlight_active_until) WHERE spotlight_active_until IS NOT NULL;
+COMMENT ON COLUMN users.spotlight_active_until IS 'Timestamp until which the user''s profile is boosted by Spotlight.';
+
 
 CREATE TABLE otps (
     id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     otp_code VARCHAR(6) NOT NULL,
-    expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '2 minute'),
-    CONSTRAINT fk_otps_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '2 minute')
 );
 
 CREATE TABLE story_time_prompts (
     id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     question story_time_prompt_type NOT NULL,
     answer TEXT NOT NULL,
-    CONSTRAINT fk_story_time_prompt_user
-        FOREIGN KEY (user_id)
-        REFERENCES users(id)
-        ON DELETE CASCADE,
     CONSTRAINT uq_user_story_time_prompt UNIQUE (user_id, question)
 );
 
 CREATE TABLE my_type_prompts (
     id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     question my_type_prompt_type NOT NULL,
     answer TEXT NOT NULL,
-    CONSTRAINT fk_my_type_prompt_user
-        FOREIGN KEY (user_id)
-        REFERENCES users(id)
-        ON DELETE CASCADE,
     CONSTRAINT uq_user_my_type_prompt UNIQUE (user_id, question)
 );
 
 CREATE TABLE getting_personal_prompts (
     id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     question getting_personal_prompt_type NOT NULL,
     answer TEXT NOT NULL,
-    CONSTRAINT fk_getting_personal_prompt_user
-        FOREIGN KEY (user_id)
-        REFERENCES users(id)
-        ON DELETE CASCADE,
     CONSTRAINT uq_user_getting_personal_prompt UNIQUE (user_id, question)
 );
 
 CREATE TABLE date_vibes_prompts (
     id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     question date_vibes_prompt_type NOT NULL,
     answer TEXT NOT NULL,
-    CONSTRAINT fk_date_vibes_prompt_user
-        FOREIGN KEY (user_id)
-        REFERENCES users(id)
-        ON DELETE CASCADE,
     CONSTRAINT uq_user_date_vibes_prompts UNIQUE (user_id, question)
 );
 
--- Function to update the updated_at column
+-- Function and Trigger Definitions
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -852,106 +875,108 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
--- Filters table
 CREATE TABLE filters (
     user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    who_you_want_to_see gender_enum, -- Can be 'man' or 'woman' from existing enum
-    radius_km INTEGER CHECK (radius_km > 0 AND radius_km <= 500), -- Example constraint: 1-500 km
+    who_you_want_to_see gender_enum,
+    radius_km INTEGER CHECK (radius_km > 0 AND radius_km <= 500),
     active_today BOOLEAN NOT NULL DEFAULT false,
     age_min INTEGER CHECK (age_min >= 18),
     age_max INTEGER CHECK (age_max >= 18),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT age_check CHECK (age_max >= age_min) -- Ensure max age is not less than min age
+    CONSTRAINT age_check CHECK (age_max >= age_min)
 );
-
 COMMENT ON COLUMN filters.who_you_want_to_see IS 'Which gender the user wants to see in their feed.';
 COMMENT ON COLUMN filters.radius_km IS 'Maximum distance in kilometers for potential matches.';
 COMMENT ON COLUMN filters.active_today IS 'Filter for users active within the last 24 hours.';
 COMMENT ON COLUMN filters.age_min IS 'Minimum age preference.';
 COMMENT ON COLUMN filters.age_max IS 'Maximum age preference.';
 
-
--- Trigger to automatically update updated_at on table update
 CREATE TRIGGER set_timestamp
 BEFORE UPDATE ON filters
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
 
--- Table to log app open events
 CREATE TABLE app_open_logs (
-    id BIGSERIAL PRIMARY KEY, -- Use BIGSERIAL for potentially high volume
+    id BIGSERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     opened_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
 COMMENT ON TABLE app_open_logs IS 'Logs each time a user is considered to have opened the app (triggered by a specific API call).';
-COMMENT ON COLUMN app_open_logs.id IS 'Unique identifier for the log entry.';
-COMMENT ON COLUMN app_open_logs.user_id IS 'The ID of the user who opened the app.';
-COMMENT ON COLUMN app_open_logs.opened_at IS 'The timestamp when the app open event was recorded.';
-
--- Index for potential analysis of user activity over time
 CREATE INDEX idx_app_open_logs_user_time ON app_open_logs (user_id, opened_at DESC);
 
--- Haversine function to calculate distance between two lat/lon points in kilometers
--- Assumes WGS84 spheroid
+
 CREATE OR REPLACE FUNCTION haversine(lat1 float, lon1 float, lat2 float, lon2 float)
 RETURNS float AS $$
 DECLARE
-    radius float := 6371; -- Earth radius in kilometers
-    delta_lat float;
-    delta_lon float;
-    a float;
-    c float;
-    d float;
+    radius float := 6371; delta_lat float; delta_lon float; a float; c float; d float;
 BEGIN
-    delta_lat := RADIANS(lat2 - lat1);
-    delta_lon := RADIANS(lon2 - lon1);
-    a := SIN(delta_lat / 2) * SIN(delta_lat / 2) +
-         COS(RADIANS(lat1)) * COS(RADIANS(lat2)) *
-         SIN(delta_lon / 2) * SIN(delta_lon / 2);
-    c := 2 * ASIN(SQRT(a));
-    d := radius * c;
+    delta_lat := RADIANS(lat2 - lat1); delta_lon := RADIANS(lon2 - lon1);
+    a := SIN(delta_lat / 2) * SIN(delta_lat / 2) + COS(RADIANS(lat1)) * COS(RADIANS(lat2)) * SIN(delta_lon / 2) * SIN(delta_lon / 2);
+    c := 2 * ASIN(SQRT(a)); d := radius * c;
     RETURN d;
 END;
-$$ LANGUAGE plpgsql IMMUTABLE; -- IMMUTABLE suggests the function result depends only on input
-
+$$ LANGUAGE plpgsql IMMUTABLE;
 COMMENT ON FUNCTION haversine(float, float, float, float) IS 'Calculates the great-circle distance between two points (latitude/longitude) in kilometers using the Haversine formula.';
 
-
--- Table to store user dislikes
 CREATE TABLE dislikes (
     disliker_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     disliked_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (disliker_user_id, disliked_user_id) -- Ensure a user cannot dislike the same person multiple times
+    PRIMARY KEY (disliker_user_id, disliked_user_id)
 );
-
 COMMENT ON TABLE dislikes IS 'Stores records of users disliking other users.';
-COMMENT ON COLUMN dislikes.disliker_user_id IS 'The ID of the user performing the dislike action.';
-COMMENT ON COLUMN dislikes.disliked_user_id IS 'The ID of the user being disliked.';
-COMMENT ON COLUMN dislikes.created_at IS 'Timestamp when the dislike occurred.';
-
--- Index to quickly check if a specific user has been disliked by someone
 CREATE INDEX idx_dislikes_disliked_user ON dislikes (disliked_user_id);
--- Index is implicitly created for the primary key (disliker_user_id, disliked_user_id)
 
--- Table to store user likes
+-- *** MODIFIED likes Table ***
 CREATE TABLE likes (
+    id SERIAL PRIMARY KEY, -- Changed PK
     liker_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     liked_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    content_type content_like_type NOT NULL DEFAULT 'media', -- Added
+    content_identifier TEXT NOT NULL DEFAULT '0', -- Added (Stores URL or prompt question enum text)
+    comment TEXT CHECK (length(comment) <= 140), -- Added, with length check
+    interaction_type like_interaction_type NOT NULL DEFAULT 'standard', -- Kept from previous step
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (liker_user_id, liked_user_id) -- Ensure a user cannot like the same person multiple times
+
+    -- Prevent liking the exact same item twice by the same user
+    CONSTRAINT uq_like_item UNIQUE (liker_user_id, liked_user_id, content_type, content_identifier)
 );
+COMMENT ON TABLE likes IS 'Stores records of users liking specific content items on other users profiles, optionally with a comment.';
+COMMENT ON COLUMN likes.content_type IS 'The type of content that was liked (media, prompt, audio).';
+COMMENT ON COLUMN likes.content_identifier IS 'Identifier for the specific content liked (e.g., media URL, prompt question).';
+COMMENT ON COLUMN likes.comment IS 'Optional comment sent with the like (max 140 chars).';
+COMMENT ON COLUMN likes.interaction_type IS 'Distinguishes standard likes from premium interactions like Roses.';
+-- Existing indexes might need review, adding index on (liked_user_id, liker_user_id) might be useful for finding matches
+CREATE INDEX idx_likes_liked_user ON likes (liked_user_id); -- Kept original
+CREATE INDEX idx_likes_liker_user ON likes (liker_user_id); -- Added for fetching user's sent likes
 
-COMMENT ON TABLE likes IS 'Stores records of users liking other users.';
-COMMENT ON COLUMN likes.liker_user_id IS 'The ID of the user performing the like action.';
-COMMENT ON COLUMN likes.liked_user_id IS 'The ID of the user being liked.';
-COMMENT ON COLUMN likes.created_at IS 'Timestamp when the like occurred.';
 
--- Index to quickly check if a specific user has been liked by someone
-CREATE INDEX idx_likes_liked_user ON likes (liked_user_id);
--- Index is implicitly created for the primary key (liker_user_id, liked_user_id)
+-- Premium Feature Tables (Unchanged from previous step)
+CREATE TABLE user_subscriptions (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    feature_type premium_feature_type NOT NULL,
+    activated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (feature_type IN ('unlimited_likes', 'travel_mode'))
+);
+CREATE INDEX idx_user_subscriptions_user_expires ON user_subscriptions (user_id, feature_type, expires_at);
+COMMENT ON TABLE user_subscriptions IS 'Tracks active time-based premium features for users.';
+COMMENT ON COLUMN user_subscriptions.expires_at IS 'Timestamp when the subscription benefit ends.';
+
+CREATE TABLE user_consumables (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    consumable_type premium_feature_type NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 0,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, consumable_type),
+    CHECK (consumable_type IN ('rose', 'spotlight')),
+    CHECK (quantity >= 0)
+);
+COMMENT ON TABLE user_consumables IS 'Tracks the balance of quantity-based premium items (Roses, Spotlights) for users.';
+COMMENT ON COLUMN user_consumables.quantity IS 'The number of remaining items the user possesses.';
 
 
 
@@ -1083,6 +1108,53 @@ func (ns NullAudioPrompt) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.AudioPrompt), nil
+}
+
+// Specifies the type of profile content being liked.
+type ContentLikeType string
+
+const (
+	ContentLikeTypeMedia                 ContentLikeType = "media"
+	ContentLikeTypePromptStory           ContentLikeType = "prompt_story"
+	ContentLikeTypePromptMytype          ContentLikeType = "prompt_mytype"
+	ContentLikeTypePromptGettingpersonal ContentLikeType = "prompt_gettingpersonal"
+	ContentLikeTypePromptDatevibes       ContentLikeType = "prompt_datevibes"
+	ContentLikeTypeAudioPrompt           ContentLikeType = "audio_prompt"
+)
+
+func (e *ContentLikeType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ContentLikeType(s)
+	case string:
+		*e = ContentLikeType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ContentLikeType: %T", src)
+	}
+	return nil
+}
+
+type NullContentLikeType struct {
+	ContentLikeType ContentLikeType
+	Valid           bool // Valid is true if ContentLikeType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullContentLikeType) Scan(value interface{}) error {
+	if value == nil {
+		ns.ContentLikeType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ContentLikeType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullContentLikeType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ContentLikeType), nil
 }
 
 type DateVibesPromptType string
@@ -1315,6 +1387,49 @@ func (ns NullGettingPersonalPromptType) Value() (driver.Value, error) {
 	return string(ns.GettingPersonalPromptType), nil
 }
 
+// Distinguishes standard likes from premium interactions like Roses.
+type LikeInteractionType string
+
+const (
+	LikeInteractionTypeStandard LikeInteractionType = "standard"
+	LikeInteractionTypeRose     LikeInteractionType = "rose"
+)
+
+func (e *LikeInteractionType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = LikeInteractionType(s)
+	case string:
+		*e = LikeInteractionType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for LikeInteractionType: %T", src)
+	}
+	return nil
+}
+
+type NullLikeInteractionType struct {
+	LikeInteractionType LikeInteractionType
+	Valid               bool // Valid is true if LikeInteractionType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullLikeInteractionType) Scan(value interface{}) error {
+	if value == nil {
+		ns.LikeInteractionType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.LikeInteractionType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullLikeInteractionType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.LikeInteractionType), nil
+}
+
 type MyTypePromptType string
 
 const (
@@ -1364,6 +1479,51 @@ func (ns NullMyTypePromptType) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.MyTypePromptType), nil
+}
+
+// Defines the types of premium features available.
+type PremiumFeatureType string
+
+const (
+	PremiumFeatureTypeUnlimitedLikes PremiumFeatureType = "unlimited_likes"
+	PremiumFeatureTypeTravelMode     PremiumFeatureType = "travel_mode"
+	PremiumFeatureTypeRose           PremiumFeatureType = "rose"
+	PremiumFeatureTypeSpotlight      PremiumFeatureType = "spotlight"
+)
+
+func (e *PremiumFeatureType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = PremiumFeatureType(s)
+	case string:
+		*e = PremiumFeatureType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for PremiumFeatureType: %T", src)
+	}
+	return nil
+}
+
+type NullPremiumFeatureType struct {
+	PremiumFeatureType PremiumFeatureType
+	Valid              bool // Valid is true if PremiumFeatureType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullPremiumFeatureType) Scan(value interface{}) error {
+	if value == nil {
+		ns.PremiumFeatureType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.PremiumFeatureType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullPremiumFeatureType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.PremiumFeatureType), nil
 }
 
 type Religion string
@@ -1553,11 +1713,8 @@ func (ns NullVerificationStatus) Value() (driver.Value, error) {
 
 // Logs each time a user is considered to have opened the app (triggered by a specific API call).
 type AppOpenLog struct {
-	// Unique identifier for the log entry.
-	ID int64
-	// The ID of the user who opened the app.
-	UserID int32
-	// The timestamp when the app open event was recorded.
+	ID       int64
+	UserID   int32
 	OpenedAt pgtype.Timestamptz
 }
 
@@ -1570,12 +1727,9 @@ type DateVibesPrompt struct {
 
 // Stores records of users disliking other users.
 type Dislike struct {
-	// The ID of the user performing the dislike action.
 	DislikerUserID int32
-	// The ID of the user being disliked.
 	DislikedUserID int32
-	// Timestamp when the dislike occurred.
-	CreatedAt pgtype.Timestamptz
+	CreatedAt      pgtype.Timestamptz
 }
 
 type Filter struct {
@@ -1601,14 +1755,20 @@ type GettingPersonalPrompt struct {
 	Answer   string
 }
 
-// Stores records of users liking other users.
+// Stores records of users liking specific content items on other users profiles, optionally with a comment.
 type Like struct {
-	// The ID of the user performing the like action.
+	ID          int32
 	LikerUserID int32
-	// The ID of the user being liked.
 	LikedUserID int32
-	// Timestamp when the like occurred.
-	CreatedAt pgtype.Timestamptz
+	// The type of content that was liked (media, prompt, audio).
+	ContentType ContentLikeType
+	// Identifier for the specific content liked (e.g., media URL, prompt question).
+	ContentIdentifier string
+	// Optional comment sent with the like (max 140 chars).
+	Comment pgtype.Text
+	// Distinguishes standard likes from premium interactions like Roses.
+	InteractionType LikeInteractionType
+	CreatedAt       pgtype.Timestamptz
 }
 
 type MyTypePrompt struct {
@@ -1656,6 +1816,28 @@ type User struct {
 	Role                UserRole
 	AudioPromptQuestion NullAudioPrompt
 	AudioPromptAnswer   pgtype.Text
+	// Timestamp until which the user's profile is boosted by Spotlight.
+	SpotlightActiveUntil pgtype.Timestamptz
+}
+
+// Tracks the balance of quantity-based premium items (Roses, Spotlights) for users.
+type UserConsumable struct {
+	UserID         int32
+	ConsumableType PremiumFeatureType
+	// The number of remaining items the user possesses.
+	Quantity  int32
+	UpdatedAt pgtype.Timestamptz
+}
+
+// Tracks active time-based premium features for users.
+type UserSubscription struct {
+	ID          int32
+	UserID      int32
+	FeatureType PremiumFeatureType
+	ActivatedAt pgtype.Timestamptz
+	// Timestamp when the subscription benefit ends.
+	ExpiresAt pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
 }
 
 
@@ -1676,6 +1858,57 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addContentLike = `-- name: AddContentLike :one
+INSERT INTO likes (
+    liker_user_id,
+    liked_user_id,
+    content_type,
+    content_identifier,
+    comment,
+    interaction_type
+) VALUES (
+    $1, $2, $3, $4, $5, $6
+)
+ON CONFLICT (liker_user_id, liked_user_id, content_type, content_identifier)
+DO NOTHING
+RETURNING id, liker_user_id, liked_user_id, content_type, content_identifier, comment, interaction_type, created_at
+`
+
+type AddContentLikeParams struct {
+	LikerUserID       int32
+	LikedUserID       int32
+	ContentType       ContentLikeType
+	ContentIdentifier string
+	Comment           pgtype.Text
+	InteractionType   LikeInteractionType
+}
+
+// Inserts a like for a specific content item, potentially with a comment.
+// content_identifier is TEXT type in the DB.
+// Prevent duplicate likes on the exact same item
+func (q *Queries) AddContentLike(ctx context.Context, arg AddContentLikeParams) (Like, error) {
+	row := q.db.QueryRow(ctx, addContentLike,
+		arg.LikerUserID,
+		arg.LikedUserID,
+		arg.ContentType,
+		arg.ContentIdentifier,
+		arg.Comment,
+		arg.InteractionType,
+	)
+	var i Like
+	err := row.Scan(
+		&i.ID,
+		&i.LikerUserID,
+		&i.LikedUserID,
+		&i.ContentType,
+		&i.ContentIdentifier,
+		&i.Comment,
+		&i.InteractionType,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const addDislike = `-- name: AddDislike :exec
 INSERT INTO dislikes (disliker_user_id, disliked_user_id)
 VALUES ($1, $2)
@@ -1692,22 +1925,6 @@ func (q *Queries) AddDislike(ctx context.Context, arg AddDislikeParams) error {
 	return err
 }
 
-const addLike = `-- name: AddLike :exec
-INSERT INTO likes (liker_user_id, liked_user_id)
-VALUES ($1, $2)
-ON CONFLICT (liker_user_id, liked_user_id) DO NOTHING
-`
-
-type AddLikeParams struct {
-	LikerUserID int32
-	LikedUserID int32
-}
-
-func (q *Queries) AddLike(ctx context.Context, arg AddLikeParams) error {
-	_, err := q.db.Exec(ctx, addLike, arg.LikerUserID, arg.LikedUserID)
-	return err
-}
-
 const addPhoneNumberInUsers = `-- name: AddPhoneNumberInUsers :one
 
 INSERT INTO users (
@@ -1715,7 +1932,7 @@ INSERT INTO users (
 ) VALUES (
     $1
 )
-RETURNING id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer
+RETURNING id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until
 `
 
 // $1 should be 'pending'
@@ -1746,6 +1963,36 @@ func (q *Queries) AddPhoneNumberInUsers(ctx context.Context, phoneNumber string)
 		&i.Role,
 		&i.AudioPromptQuestion,
 		&i.AudioPromptAnswer,
+		&i.SpotlightActiveUntil,
+	)
+	return i, err
+}
+
+const addUserSubscription = `-- name: AddUserSubscription :one
+INSERT INTO user_subscriptions (
+    user_id, feature_type, expires_at, activated_at
+) VALUES (
+    $1, $2, $3, NOW()
+)
+RETURNING id, user_id, feature_type, activated_at, expires_at, created_at
+`
+
+type AddUserSubscriptionParams struct {
+	UserID      int32
+	FeatureType PremiumFeatureType
+	ExpiresAt   pgtype.Timestamptz
+}
+
+func (q *Queries) AddUserSubscription(ctx context.Context, arg AddUserSubscriptionParams) (UserSubscription, error) {
+	row := q.db.QueryRow(ctx, addUserSubscription, arg.UserID, arg.FeatureType, arg.ExpiresAt)
+	var i UserSubscription
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.FeatureType,
+		&i.ActivatedAt,
+		&i.ExpiresAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -1779,6 +2026,20 @@ WHERE id = $1
 func (q *Queries) ClearUserMediaURLs(ctx context.Context, id int32) error {
 	_, err := q.db.Exec(ctx, clearUserMediaURLs, id)
 	return err
+}
+
+const countRecentStandardLikes = `-- name: CountRecentStandardLikes :one
+SELECT COUNT(*) FROM likes
+WHERE liker_user_id = $1
+  AND interaction_type = 'standard'
+  AND created_at >= NOW() - INTERVAL '24 hours'
+`
+
+func (q *Queries) CountRecentStandardLikes(ctx context.Context, likerUserID int32) (int64, error) {
+	row := q.db.QueryRow(ctx, countRecentStandardLikes, likerUserID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const createDateVibesPrompt = `-- name: CreateDateVibesPrompt :one
@@ -1909,7 +2170,7 @@ INSERT INTO users (
 ) VALUES (
     $1, $2
 )
-RETURNING id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer
+RETURNING id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until
 `
 
 type CreateUserMinimalParams struct {
@@ -1944,6 +2205,36 @@ func (q *Queries) CreateUserMinimal(ctx context.Context, arg CreateUserMinimalPa
 		&i.Role,
 		&i.AudioPromptQuestion,
 		&i.AudioPromptAnswer,
+		&i.SpotlightActiveUntil,
+	)
+	return i, err
+}
+
+const decrementUserConsumable = `-- name: DecrementUserConsumable :one
+
+UPDATE user_consumables
+SET quantity = quantity - 1,
+    updated_at = NOW()
+WHERE user_id = $1
+  AND consumable_type = $2 -- e.g., 'rose'
+  AND quantity > 0
+RETURNING user_id, consumable_type, quantity, updated_at
+`
+
+type DecrementUserConsumableParams struct {
+	UserID         int32
+	ConsumableType PremiumFeatureType
+}
+
+// e.g., 'rose'
+func (q *Queries) DecrementUserConsumable(ctx context.Context, arg DecrementUserConsumableParams) (UserConsumable, error) {
+	row := q.db.QueryRow(ctx, decrementUserConsumable, arg.UserID, arg.ConsumableType)
+	var i UserConsumable
+	err := row.Scan(
+		&i.UserID,
+		&i.ConsumableType,
+		&i.Quantity,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -2014,66 +2305,67 @@ func (q *Queries) DeleteUserStoryTimePrompts(ctx context.Context, userID int32) 
 	return err
 }
 
-const getHomeFeed = `-- name: GetHomeFeed :many
+const getActiveSubscription = `-- name: GetActiveSubscription :one
+SELECT id, user_id, feature_type, activated_at, expires_at, created_at FROM user_subscriptions
+WHERE user_id = $1
+  AND feature_type = $2 -- e.g., 'unlimited_likes'
+  AND expires_at > NOW()
+LIMIT 1
+`
 
+type GetActiveSubscriptionParams struct {
+	UserID      int32
+	FeatureType PremiumFeatureType
+}
+
+func (q *Queries) GetActiveSubscription(ctx context.Context, arg GetActiveSubscriptionParams) (UserSubscription, error) {
+	row := q.db.QueryRow(ctx, getActiveSubscription, arg.UserID, arg.FeatureType)
+	var i UserSubscription
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.FeatureType,
+		&i.ActivatedAt,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getHomeFeed = `-- name: GetHomeFeed :many
 WITH RequestingUser AS (
     SELECT
-        u.id,
-        u.latitude,
-        u.longitude,
-        u.gender,
-        u.date_of_birth
-    FROM users u
-    WHERE u.id = $1 -- requesting_user_id
+        u.id, u.latitude, u.longitude, u.gender, u.date_of_birth, u.spotlight_active_until
+    FROM users u WHERE u.id = $1
 ), RequestingUserFilters AS (
     SELECT
-        f.user_id,
-        f.who_you_want_to_see,
-        f.radius_km,
-        f.active_today,
-        f.age_min,
-        f.age_max
-    FROM filters f
-    WHERE f.user_id = $1 -- requesting_user_id
+        f.user_id, f.who_you_want_to_see, f.radius_km, f.active_today, f.age_min, f.age_max
+    FROM filters f WHERE f.user_id = $1
 )
 SELECT
-    target_user.id, target_user.created_at, target_user.name, target_user.last_name, target_user.phone_number, target_user.date_of_birth, target_user.latitude, target_user.longitude, target_user.gender, target_user.dating_intention, target_user.height, target_user.hometown, target_user.job_title, target_user.education, target_user.religious_beliefs, target_user.drinking_habit, target_user.smoking_habit, target_user.media_urls, target_user.verification_status, target_user.verification_pic, target_user.role, target_user.audio_prompt_question, target_user.audio_prompt_answer,
+    target_user.id, target_user.created_at, target_user.name, target_user.last_name, target_user.phone_number, target_user.date_of_birth, target_user.latitude, target_user.longitude, target_user.gender, target_user.dating_intention, target_user.height, target_user.hometown, target_user.job_title, target_user.education, target_user.religious_beliefs, target_user.drinking_habit, target_user.smoking_habit, target_user.media_urls, target_user.verification_status, target_user.verification_pic, target_user.role, target_user.audio_prompt_question, target_user.audio_prompt_answer, target_user.spotlight_active_until,
     haversine(ru.latitude, ru.longitude, target_user.latitude, target_user.longitude) AS distance_km
 FROM users AS target_user
-JOIN RequestingUser ru ON target_user.id != ru.id -- Don't show self
-JOIN RequestingUserFilters rf ON ru.id = rf.user_id -- Ensure requesting user has filters (or defaults were just created)
-LEFT JOIN filters AS target_user_filters ON target_user.id = target_user_filters.user_id -- Filters of the potential match
+JOIN RequestingUser ru ON target_user.id != ru.id
+JOIN RequestingUserFilters rf ON ru.id = rf.user_id
+LEFT JOIN filters AS target_user_filters ON target_user.id = target_user_filters.user_id
 WHERE
-    -- Location Check: target user must have location
     target_user.latitude IS NOT NULL AND target_user.longitude IS NOT NULL
-    -- Radius Check: target user must be within radius OR radius filter is not set
     AND (rf.radius_km IS NULL OR haversine(ru.latitude, ru.longitude, target_user.latitude, target_user.longitude) <= rf.radius_km)
-
-    -- Gender Preference Check (Requesting User's Preference)
     AND target_user.gender = rf.who_you_want_to_see
-
-    -- Gender Preference Check (Target User's Preference - Reciprocal)
-    AND target_user_filters.who_you_want_to_see = ru.gender
-
-    -- Age Check: target user's age must be within requesting user's filter range
+    AND (target_user_filters.user_id IS NULL OR target_user_filters.who_you_want_to_see IS NULL OR target_user_filters.who_you_want_to_see = ru.gender)
     AND target_user.date_of_birth IS NOT NULL
     AND EXTRACT(YEAR FROM AGE(target_user.date_of_birth)) BETWEEN rf.age_min AND rf.age_max
-
-    -- Active Today Check (only if filter is enabled)
     AND (NOT rf.active_today OR EXISTS (
             SELECT 1 FROM app_open_logs aol
             WHERE aol.user_id = target_user.id AND aol.opened_at >= NOW() - INTERVAL '24 hours'
         ))
-
-    -- Dislike Checks (Neither user disliked the other)
     AND NOT EXISTS (SELECT 1 FROM dislikes d WHERE d.disliker_user_id = ru.id AND d.disliked_user_id = target_user.id)
     AND NOT EXISTS (SELECT 1 FROM dislikes d WHERE d.disliker_user_id = target_user.id AND d.disliked_user_id = ru.id)
-
-    -- Like Check (Requesting user has NOT liked the target user)
-    AND NOT EXISTS (SELECT 1 FROM likes l WHERE l.liker_user_id = ru.id AND l.liked_user_id = target_user.id) -- <-- ADDED like check
-
+    AND NOT EXISTS (SELECT 1 FROM likes l WHERE l.liker_user_id = ru.id AND l.liked_user_id = target_user.id)
 ORDER BY
-    distance_km ASC, -- Primary sort: Closest first
+    CASE WHEN target_user.spotlight_active_until > NOW() THEN 0 ELSE 1 END ASC,
+    distance_km ASC,
     ABS(EXTRACT(YEAR FROM AGE(ru.date_of_birth)) - EXTRACT(YEAR FROM AGE(target_user.date_of_birth))) ASC NULLS LAST
 LIMIT $2
 `
@@ -2084,33 +2376,33 @@ type GetHomeFeedParams struct {
 }
 
 type GetHomeFeedRow struct {
-	ID                  int32
-	CreatedAt           pgtype.Timestamptz
-	Name                pgtype.Text
-	LastName            pgtype.Text
-	PhoneNumber         string
-	DateOfBirth         pgtype.Date
-	Latitude            pgtype.Float8
-	Longitude           pgtype.Float8
-	Gender              NullGenderEnum
-	DatingIntention     NullDatingIntention
-	Height              pgtype.Float8
-	Hometown            pgtype.Text
-	JobTitle            pgtype.Text
-	Education           pgtype.Text
-	ReligiousBeliefs    NullReligion
-	DrinkingHabit       NullDrinkingSmokingHabits
-	SmokingHabit        NullDrinkingSmokingHabits
-	MediaUrls           []string
-	VerificationStatus  VerificationStatus
-	VerificationPic     pgtype.Text
-	Role                UserRole
-	AudioPromptQuestion NullAudioPrompt
-	AudioPromptAnswer   pgtype.Text
-	DistanceKm          float64
+	ID                   int32
+	CreatedAt            pgtype.Timestamptz
+	Name                 pgtype.Text
+	LastName             pgtype.Text
+	PhoneNumber          string
+	DateOfBirth          pgtype.Date
+	Latitude             pgtype.Float8
+	Longitude            pgtype.Float8
+	Gender               NullGenderEnum
+	DatingIntention      NullDatingIntention
+	Height               pgtype.Float8
+	Hometown             pgtype.Text
+	JobTitle             pgtype.Text
+	Education            pgtype.Text
+	ReligiousBeliefs     NullReligion
+	DrinkingHabit        NullDrinkingSmokingHabits
+	SmokingHabit         NullDrinkingSmokingHabits
+	MediaUrls            []string
+	VerificationStatus   VerificationStatus
+	VerificationPic      pgtype.Text
+	Role                 UserRole
+	AudioPromptQuestion  NullAudioPrompt
+	AudioPromptAnswer    pgtype.Text
+	SpotlightActiveUntil pgtype.Timestamptz
+	DistanceKm           float64
 }
 
-// Ignore if like already exists
 func (q *Queries) GetHomeFeed(ctx context.Context, arg GetHomeFeedParams) ([]GetHomeFeedRow, error) {
 	rows, err := q.db.Query(ctx, getHomeFeed, arg.ID, arg.Limit)
 	if err != nil {
@@ -2144,6 +2436,7 @@ func (q *Queries) GetHomeFeed(ctx context.Context, arg GetHomeFeedParams) ([]Get
 			&i.Role,
 			&i.AudioPromptQuestion,
 			&i.AudioPromptAnswer,
+			&i.SpotlightActiveUntil,
 			&i.DistanceKm,
 		); err != nil {
 			return nil, err
@@ -2176,7 +2469,7 @@ func (q *Queries) GetOTPByUser(ctx context.Context, userID int32) (Otp, error) {
 }
 
 const getPendingVerificationUsers = `-- name: GetPendingVerificationUsers :many
-SELECT id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer FROM users
+SELECT id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until FROM users
 WHERE verification_status = $1
 `
 
@@ -2213,6 +2506,7 @@ func (q *Queries) GetPendingVerificationUsers(ctx context.Context, verificationS
 			&i.Role,
 			&i.AudioPromptQuestion,
 			&i.AudioPromptAnswer,
+			&i.SpotlightActiveUntil,
 		); err != nil {
 			return nil, err
 		}
@@ -2244,7 +2538,7 @@ func (q *Queries) GetUserAudioPrompt(ctx context.Context, id int32) (GetUserAudi
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer FROM users
+SELECT id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until FROM users
 WHERE id = $1 LIMIT 1
 `
 
@@ -2275,12 +2569,13 @@ func (q *Queries) GetUserByID(ctx context.Context, id int32) (User, error) {
 		&i.Role,
 		&i.AudioPromptQuestion,
 		&i.AudioPromptAnswer,
+		&i.SpotlightActiveUntil,
 	)
 	return i, err
 }
 
 const getUserByPhone = `-- name: GetUserByPhone :one
-SELECT id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer FROM users
+SELECT id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until FROM users
 WHERE phone_number = $1 LIMIT 1
 `
 
@@ -2311,6 +2606,30 @@ func (q *Queries) GetUserByPhone(ctx context.Context, phoneNumber string) (User,
 		&i.Role,
 		&i.AudioPromptQuestion,
 		&i.AudioPromptAnswer,
+		&i.SpotlightActiveUntil,
+	)
+	return i, err
+}
+
+const getUserConsumable = `-- name: GetUserConsumable :one
+SELECT user_id, consumable_type, quantity, updated_at FROM user_consumables
+WHERE user_id = $1
+  AND consumable_type = $2
+`
+
+type GetUserConsumableParams struct {
+	UserID         int32
+	ConsumableType PremiumFeatureType
+}
+
+func (q *Queries) GetUserConsumable(ctx context.Context, arg GetUserConsumableParams) (UserConsumable, error) {
+	row := q.db.QueryRow(ctx, getUserConsumable, arg.UserID, arg.ConsumableType)
+	var i UserConsumable
+	err := row.Scan(
+		&i.UserID,
+		&i.ConsumableType,
+		&i.Quantity,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -2521,7 +2840,7 @@ UPDATE users SET
     drinking_habit = $13,
     smoking_habit = $14
 WHERE id = $15
-RETURNING id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer
+RETURNING id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until
 `
 
 type UpdateUserProfileParams struct {
@@ -2585,6 +2904,7 @@ func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfilePa
 		&i.Role,
 		&i.AudioPromptQuestion,
 		&i.AudioPromptAnswer,
+		&i.SpotlightActiveUntil,
 	)
 	return i, err
 }
@@ -2593,7 +2913,7 @@ const updateUserRole = `-- name: UpdateUserRole :one
 UPDATE users
 SET role = $1
 WHERE id = $2
-RETURNING id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer
+RETURNING id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until
 `
 
 type UpdateUserRoleParams struct {
@@ -2628,6 +2948,7 @@ func (q *Queries) UpdateUserRole(ctx context.Context, arg UpdateUserRoleParams) 
 		&i.Role,
 		&i.AudioPromptQuestion,
 		&i.AudioPromptAnswer,
+		&i.SpotlightActiveUntil,
 	)
 	return i, err
 }
@@ -2638,7 +2959,7 @@ SET
     verification_pic = $1,
     verification_status = $2
 WHERE id = $3
-RETURNING id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer
+RETURNING id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until
 `
 
 type UpdateUserVerificationDetailsParams struct {
@@ -2674,6 +2995,7 @@ func (q *Queries) UpdateUserVerificationDetails(ctx context.Context, arg UpdateU
 		&i.Role,
 		&i.AudioPromptQuestion,
 		&i.AudioPromptAnswer,
+		&i.SpotlightActiveUntil,
 	)
 	return i, err
 }
@@ -2682,7 +3004,7 @@ const updateUserVerificationStatus = `-- name: UpdateUserVerificationStatus :one
 UPDATE users
 SET verification_status = $1
 WHERE id = $2
-RETURNING id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer
+RETURNING id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until
 `
 
 type UpdateUserVerificationStatusParams struct {
@@ -2717,6 +3039,34 @@ func (q *Queries) UpdateUserVerificationStatus(ctx context.Context, arg UpdateUs
 		&i.Role,
 		&i.AudioPromptQuestion,
 		&i.AudioPromptAnswer,
+		&i.SpotlightActiveUntil,
+	)
+	return i, err
+}
+
+const upsertUserConsumable = `-- name: UpsertUserConsumable :one
+INSERT INTO user_consumables (user_id, consumable_type, quantity)
+VALUES ($1, $2, $3) -- $3 is the quantity to add
+ON CONFLICT (user_id, consumable_type) DO UPDATE
+SET quantity = user_consumables.quantity + EXCLUDED.quantity,
+    updated_at = NOW()
+RETURNING user_id, consumable_type, quantity, updated_at
+`
+
+type UpsertUserConsumableParams struct {
+	UserID         int32
+	ConsumableType PremiumFeatureType
+	Quantity       int32
+}
+
+func (q *Queries) UpsertUserConsumable(ctx context.Context, arg UpsertUserConsumableParams) (UserConsumable, error) {
+	row := q.db.QueryRow(ctx, upsertUserConsumable, arg.UserID, arg.ConsumableType, arg.Quantity)
+	var i UserConsumable
+	err := row.Scan(
+		&i.UserID,
+		&i.ConsumableType,
+		&i.Quantity,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -2793,12 +3143,14 @@ var (
 	queries *migrations.Queries
 )
 
+// InitDB initializes the database connection pool.
 func InitDB() error {
 	poolMu.Lock()
 	defer poolMu.Unlock()
 
 	if pool != nil {
-		return nil
+		log.Println("Database connection pool already initialized.")
+		return nil // Already initialized
 	}
 
 	dbURL := os.Getenv("DATABASE_URL")
@@ -2806,84 +3158,78 @@ func InitDB() error {
 		log.Fatal("DATABASE_URL environment variable is not set")
 	}
 
+	var err error
 	dbConfig, err := pgxpool.ParseConfig(dbURL)
 	if err != nil {
 		log.Printf("Error parsing DATABASE_URL: %v", err)
 		return err
 	}
 
+	// Configure pool settings (adjust as needed)
 	dbConfig.MaxConns = 50
-	dbConfig.MinConns = 10
+	dbConfig.MinConns = 5 // Can start lower
 	dbConfig.MaxConnLifetime = time.Hour
-	dbConfig.MaxConnIdleTime = 30 * time.Minute
+	dbConfig.MaxConnIdleTime = 5 * time.Minute // Reduce idle time
 	dbConfig.HealthCheckPeriod = 1 * time.Minute
+	dbConfig.ConnConfig.ConnectTimeout = 5 * time.Second
 
 	log.Println("Attempting to connect to database...")
+	// Retry logic could be added here if desired
 	newPool, err := pgxpool.NewWithConfig(context.Background(), dbConfig)
 	if err != nil {
 		log.Printf("Unable to create connection pool: %v", err)
 		return err
 	}
 
+	// Ping the database to verify connection
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := newPool.Ping(ctx); err != nil {
-		newPool.Close()
-		log.Printf("Database ping failed: %v", err)
+	if err = newPool.Ping(ctx); err != nil {
+		newPool.Close() // Close the pool if ping fails
+		log.Printf("Database ping failed after connection: %v", err)
 		return err
 	}
 
 	pool = newPool
-	queries = migrations.New(pool)
+	queries = migrations.New(pool) // Create queries instance
 
 	log.Println("Database connection pool initialized successfully")
 	return nil
 }
 
+// GetDB returns the queries instance, ensuring the pool is initialized.
 func GetDB() *migrations.Queries {
 	poolMu.Lock()
+	// If pool is nil, InitDB likely failed or hasn't been called.
+	// It's better to let InitDB handle the initialization.
 	if pool == nil {
 		poolMu.Unlock()
-		if err := InitDB(); err != nil {
-			log.Printf("Failed to initialize database connection: %v", err)
-			return nil
-		}
-		poolMu.Lock()
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if err := pool.Ping(ctx); err != nil {
-		log.Printf("Database connection check failed: %v. Attempting to reconnect...", err)
-		if pool != nil {
-			pool.Close()
-			pool = nil
-			queries = nil
-		}
-		poolMu.Unlock()
-
-		if err := InitDB(); err != nil {
-			log.Printf("Failed to reconnect to database: %v", err)
-			return nil
-		}
-		log.Println("Successfully reconnected to the database.")
-		poolMu.Lock()
-	}
-
-	currentQueries := queries
-	poolMu.Unlock()
-	return currentQueries
-}
-
-func GetPool() *pgxpool.Pool {
-	if GetDB() == nil {
+		log.Println("GetDB called but pool is not initialized. Check InitDB call.")
+		// Returning nil forces callers to handle the uninitialized state.
+		// Alternatively, could attempt InitDB here, but it might hide startup issues.
 		return nil
 	}
-	poolMu.Lock()
-	defer poolMu.Unlock()
-	return pool
+	q := queries // Get the current queries instance
+	poolMu.Unlock()
+	return q
 }
 
+// GetPool returns the raw connection pool. Use with caution.
+func GetPool() *pgxpool.Pool {
+	poolMu.Lock()
+	p := pool // Get the current pool instance
+	poolMu.Unlock()
+	// We check if 'p' is nil AFTER unlocking to avoid holding the lock
+	// while potentially calling GetDB() which also locks.
+	if p == nil {
+		log.Println("GetPool called but pool is not initialized. Check InitDB call.")
+		// Attempt to initialize or return nil? Returning nil is safer for now.
+		return nil
+	}
+	return p
+}
+
+// CloseDB closes the database connection pool.
 func CloseDB() {
 	poolMu.Lock()
 	defer poolMu.Unlock()
@@ -4043,6 +4389,85 @@ func parseHeightString(heightStr string) (float64, error) {
 
 
 ================================================
+File: pkg/handlers/dislikeHandler.go
+================================================
+package handlers
+
+import (
+	"encoding/json"
+	"log"
+	"net/http"
+
+	"github.com/arnnvv/peeple-api/migrations"
+	"github.com/arnnvv/peeple-api/pkg/db"
+	"github.com/arnnvv/peeple-api/pkg/token"
+	"github.com/arnnvv/peeple-api/pkg/utils"
+)
+
+type DislikeRequest struct {
+	DislikedUserID int32 `json:"disliked_user_id"`
+}
+
+type DislikeResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+
+func DislikeHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	ctx := r.Context()
+	queries := db.GetDB()
+
+	if r.Method != http.MethodPost {
+		utils.RespondWithJSON(w, http.StatusMethodNotAllowed, DislikeResponse{Success: false, Message: "Method Not Allowed: Use POST"})
+		return
+	}
+
+	claims, ok := ctx.Value(token.ClaimsContextKey).(*token.Claims)
+	if !ok || claims == nil || claims.UserID <= 0 {
+		utils.RespondWithJSON(w, http.StatusUnauthorized, DislikeResponse{Success: false, Message: "Authentication required"})
+		return
+	}
+	dislikerUserID := int32(claims.UserID)
+
+	var req DislikeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		utils.RespondWithJSON(w, http.StatusBadRequest, DislikeResponse{Success: false, Message: "Invalid request body format"})
+		return
+	}
+	defer r.Body.Close()
+
+	if req.DislikedUserID <= 0 {
+		utils.RespondWithJSON(w, http.StatusBadRequest, DislikeResponse{Success: false, Message: "Valid disliked_user_id is required"})
+		return
+	}
+
+	if req.DislikedUserID == dislikerUserID {
+		utils.RespondWithJSON(w, http.StatusBadRequest, DislikeResponse{Success: false, Message: "Cannot dislike yourself"})
+		return
+	}
+
+	log.Printf("Dislike attempt: User %d -> User %d", dislikerUserID, req.DislikedUserID)
+
+	err := queries.AddDislike(ctx, migrations.AddDislikeParams{
+		DislikerUserID: dislikerUserID,
+		DislikedUserID: req.DislikedUserID,
+	})
+
+	if err != nil {
+		log.Printf("Error adding dislike for user %d -> %d: %v", dislikerUserID, req.DislikedUserID, err)
+		// Handle potential DB errors if needed, e.g., constraint violations although ON CONFLICT handles duplicates
+		utils.RespondWithJSON(w, http.StatusInternalServerError, DislikeResponse{Success: false, Message: "Failed to process dislike"})
+		return
+	}
+
+	log.Printf("Dislike processed successfully: User %d -> User %d", dislikerUserID, req.DislikedUserID)
+	utils.RespondWithJSON(w, http.StatusOK, DislikeResponse{Success: true, Message: "Disliked successfully"})
+}
+
+
+
+================================================
 File: pkg/handlers/filtersHandler.go
 ================================================
 package handlers
@@ -4518,6 +4943,268 @@ func GetHomeFeedHandler(w http.ResponseWriter, r *http.Request) {
 
 
 ================================================
+File: pkg/handlers/iapHandler.go
+================================================
+package handlers
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/arnnvv/peeple-api/migrations"
+	"github.com/arnnvv/peeple-api/pkg/db"
+	"github.com/arnnvv/peeple-api/pkg/token"
+	"github.com/arnnvv/peeple-api/pkg/utils"
+	"github.com/jackc/pgx/v5/pgtype"
+)
+
+// VerifyPurchaseRequest is the expected structure from the mobile app
+type VerifyPurchaseRequest struct {
+	Platform      string `json:"platform"`
+	ReceiptData   string `json:"receipt_data"`
+	ProductID     string `json:"product_id"`
+	TransactionID string `json:"transaction_id"`
+}
+
+// VerifyPurchaseResponse is sent back to the mobile app
+type VerifyPurchaseResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+
+// --- Placeholder Verification ---
+func verifyReceipt(platform, receiptData, productID, transactionID string) (bool, error) {
+	log.Printf("[DEBUG IAP Verify] Simulating receipt verification...")
+	log.Printf("[DEBUG IAP Verify]   Platform: %s", platform)
+	log.Printf("[DEBUG IAP Verify]   ProductID: %s", productID)
+	log.Printf("[DEBUG IAP Verify]   TxID: %s", transactionID)
+	if platform != "ios" && platform != "android" {
+		log.Printf("[ERROR IAP Verify] Invalid platform")
+		return false, errors.New("invalid platform specified")
+	}
+	if receiptData == "" || productID == "" || transactionID == "" {
+		log.Printf("[ERROR IAP Verify] Missing required data")
+		return false, errors.New("missing required purchase data for verification")
+	}
+	time.Sleep(50 * time.Millisecond)
+	log.Printf("[DEBUG IAP Verify] Simulation successful.")
+	return true, nil
+}
+
+// VerifyPurchaseHandler handles requests from the app to verify IAPs
+func VerifyPurchaseHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	ctx := r.Context()
+	queries := db.GetDB()
+	if queries == nil {
+		log.Println("ERROR: VerifyPurchaseHandler: Database connection not available.")
+		utils.RespondWithJSON(w, http.StatusInternalServerError, VerifyPurchaseResponse{Success: false, Message: "Database connection error"})
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		utils.RespondWithJSON(w, http.StatusMethodNotAllowed, VerifyPurchaseResponse{Success: false, Message: "Method Not Allowed: Use POST"})
+		return
+	}
+
+	claims, ok := ctx.Value(token.ClaimsContextKey).(*token.Claims)
+	if !ok || claims == nil || claims.UserID <= 0 {
+		utils.RespondWithJSON(w, http.StatusUnauthorized, VerifyPurchaseResponse{Success: false, Message: "Authentication required"})
+		return
+	}
+	userID := int32(claims.UserID)
+
+	var req VerifyPurchaseRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		utils.RespondWithJSON(w, http.StatusBadRequest, VerifyPurchaseResponse{Success: false, Message: "Invalid request body format"})
+		return
+	}
+	defer r.Body.Close()
+
+	if req.Platform == "" || req.ReceiptData == "" || req.ProductID == "" || req.TransactionID == "" {
+		utils.RespondWithJSON(w, http.StatusBadRequest, VerifyPurchaseResponse{Success: false, Message: "Missing required fields: platform, receipt_data, product_id, transaction_id"})
+		return
+	}
+	log.Printf("[DEBUG VerifyHandler] Processing IAP: User=%d, Product=%s, TxID=%s", userID, req.ProductID, req.TransactionID)
+
+	// --- Step 1: Verify Receipt (Placeholder) ---
+	verified, err := verifyReceipt(req.Platform, req.ReceiptData, req.ProductID, req.TransactionID)
+	if err != nil || !verified {
+		log.Printf("[ERROR VerifyHandler] IAP verification failed: User=%d, TxID=%s, Error=%v", userID, req.TransactionID, err)
+		utils.RespondWithJSON(w, http.StatusBadRequest, VerifyPurchaseResponse{Success: false, Message: "Purchase verification failed"})
+		return
+	}
+	log.Printf("[DEBUG VerifyHandler] IAP receipt/token verified (simulated): User=%d, TxID=%s", userID, req.TransactionID)
+
+	// --- Step 2: Check for Replay Attack (TODO) ---
+	log.Printf("[DEBUG VerifyHandler] Skipping replay check: User=%d, TxID=%s (TODO)", userID, req.TransactionID)
+
+	// --- Step 3: Grant Feature based on Product ID ---
+	var grantErr error
+	productParts := strings.Split(req.ProductID, "_")
+	log.Printf("[DEBUG VerifyHandler] Product ID Parts (Split by '_'): %q", productParts)
+
+	if len(productParts) < 3 {
+		log.Printf("[ERROR VerifyHandler] Invalid product ID format (expected at least 3 parts separated by _): User=%d, Product=%s, Parts=%d", userID, req.ProductID, len(productParts))
+		utils.RespondWithJSON(w, http.StatusBadRequest, VerifyPurchaseResponse{Success: false, Message: "Invalid product identifier format"})
+		return
+	}
+
+	// ** FINAL PARSING LOGIC **
+	detail := productParts[len(productParts)-1] // Value/Duration is always last.
+	log.Printf("[DEBUG VerifyHandler] Assumed Detail Part: %s", detail)
+
+	// Identify feature based on expected structure parts using HasSuffix for flexibility
+	actualFeatureType := ""
+	isConsumable := false
+	isSubscription := false
+
+	partBeforeDetail := productParts[len(productParts)-2]
+	partTwoBeforeDetail := productParts[len(productParts)-3] // Part potentially containing the core feature name
+
+	log.Printf("[DEBUG VerifyHandler] Part before detail: '%s'", partBeforeDetail)
+	log.Printf("[DEBUG VerifyHandler] Part two before detail: '%s'", partTwoBeforeDetail)
+
+	// Check Consumables: ..._feature_pack_VALUE
+	if partBeforeDetail == "pack" {
+		if strings.HasSuffix(partTwoBeforeDetail, "rose") { // Check if it ends with rose (e.g., com.yourapp.rose)
+			actualFeatureType = "rose"
+			isConsumable = true
+			log.Printf("[DEBUG VerifyHandler] Matched pattern: ..._rose_pack_...")
+		} else if strings.HasSuffix(partTwoBeforeDetail, "spotlight") { // Check if it ends with spotlight
+			actualFeatureType = "spotlight"
+			isConsumable = true
+			log.Printf("[DEBUG VerifyHandler] Matched pattern: ..._spotlight_pack_...")
+		}
+		// Check Subscriptions: ..._feature_descriptor_VALUE
+	} else if partBeforeDetail == "likes" { // Descriptor is feature itself
+		if strings.HasSuffix(partTwoBeforeDetail, "unlimited") { // Check qualifier before
+			actualFeatureType = "likes"
+			isSubscription = true
+			log.Printf("[DEBUG VerifyHandler] Matched pattern: ..._unlimited_likes_...")
+		}
+	} else if partBeforeDetail == "mode" { // Descriptor is mode
+		if strings.HasSuffix(partTwoBeforeDetail, "travel") { // Check qualifier before
+			actualFeatureType = "travel"
+			isSubscription = true
+			log.Printf("[DEBUG VerifyHandler] Matched pattern: ..._travel_mode_...")
+		}
+	}
+
+	// Final check if a type was identified
+	if actualFeatureType == "" {
+		log.Printf("[ERROR VerifyHandler] Could not match known product structure: Product='%s', User=%d", req.ProductID, userID)
+		utils.RespondWithJSON(w, http.StatusBadRequest, VerifyPurchaseResponse{Success: false, Message: "Unrecognized product structure"})
+		return
+	}
+	log.Printf("[DEBUG VerifyHandler] Determined Feature Type: '%s', Detail: '%s', IsConsumable: %t, IsSubscription: %t", actualFeatureType, detail, isConsumable, isSubscription)
+
+	// Grant based on the identified feature key and type
+	if isConsumable {
+		switch actualFeatureType {
+		case "rose":
+			grantErr = grantConsumable(ctx, queries, userID, migrations.PremiumFeatureTypeRose, detail)
+		case "spotlight":
+			grantErr = grantConsumable(ctx, queries, userID, migrations.PremiumFeatureTypeSpotlight, detail)
+		default:
+			grantErr = fmt.Errorf("internal error: unknown consumable type '%s'", actualFeatureType)
+		}
+	} else if isSubscription {
+		switch actualFeatureType {
+		case "likes":
+			grantErr = grantSubscription(ctx, queries, userID, migrations.PremiumFeatureTypeUnlimitedLikes, detail)
+		case "travel":
+			grantErr = grantSubscription(ctx, queries, userID, migrations.PremiumFeatureTypeTravelMode, detail)
+		default:
+			grantErr = fmt.Errorf("internal error: unknown subscription type '%s'", actualFeatureType)
+		}
+	} else {
+		// Should not happen if logic above is complete
+		grantErr = fmt.Errorf("internal error: product identified but type (consumable/subscription) unknown")
+	}
+	// ** END OF FINAL PARSING LOGIC **
+
+	if grantErr != nil {
+		log.Printf("[ERROR VerifyHandler] Failed to grant feature: Product=%s, Type=%s, Detail=%s, User=%d, Error=%v", req.ProductID, actualFeatureType, detail, userID, grantErr)
+		utils.RespondWithJSON(w, http.StatusInternalServerError, VerifyPurchaseResponse{Success: false, Message: "Failed to update user features"})
+		return
+	}
+
+	// --- Step 4: Mark Transaction as Processed (TODO) ---
+	log.Printf("[DEBUG VerifyHandler] Skipping marking TxID %s as processed (TODO)", req.TransactionID)
+
+	// --- Step 5: Respond Success ---
+	log.Printf("[INFO VerifyHandler] Successfully processed IAP: User=%d, Product=%s, TxID=%s", userID, req.ProductID, req.TransactionID)
+	utils.RespondWithJSON(w, http.StatusOK, VerifyPurchaseResponse{Success: true, Message: "Purchase verified and feature granted"})
+}
+
+// grantConsumable updates the user's consumable balance
+func grantConsumable(ctx context.Context, queries *migrations.Queries, userID int32, consumableType migrations.PremiumFeatureType, detail string) error {
+	log.Printf("[DEBUG grantConsumable] Granting: User=%d, Type=%s, Detail=%s", userID, consumableType, detail)
+	quantity, err := strconv.Atoi(detail)
+	if err != nil || quantity <= 0 {
+		log.Printf("[ERROR grantConsumable] Invalid quantity: Detail='%s', User=%d, Error=%v", detail, userID, err)
+		return fmt.Errorf("invalid quantity detail '%s' for consumable product", detail)
+	}
+
+	_, dbErr := queries.UpsertUserConsumable(ctx, migrations.UpsertUserConsumableParams{
+		UserID:         userID,
+		ConsumableType: consumableType,
+		Quantity:       int32(quantity),
+	})
+
+	if dbErr != nil {
+		log.Printf("[ERROR grantConsumable] DB Error: User=%d, Type=%s, Error=%v", userID, consumableType, dbErr)
+		return fmt.Errorf("database error upserting consumable %s for user %d: %w", consumableType, userID, dbErr)
+	}
+	log.Printf("[INFO grantConsumable] Granted %d of %s to User %d", quantity, consumableType, userID)
+	return nil
+}
+
+// grantSubscription adds a new subscription record for the user
+func grantSubscription(ctx context.Context, queries *migrations.Queries, userID int32, featureType migrations.PremiumFeatureType, detail string) error {
+	log.Printf("[DEBUG grantSubscription] Granting: User=%d, Type=%s, Detail=%s", userID, featureType, detail)
+	var duration time.Duration
+	normalizedDetail := strings.ToLower(strings.TrimSpace(detail))
+
+	switch normalizedDetail {
+	case "1day":
+		duration = 24 * time.Hour
+	case "1week":
+		duration = 7 * 24 * time.Hour
+	// Add other durations as needed
+	default:
+		log.Printf("[ERROR grantSubscription] Invalid duration: Detail='%s', User=%d", detail, userID)
+		return fmt.Errorf("invalid duration detail '%s' for subscription product", detail)
+	}
+
+	expiresAt := time.Now().Add(duration)
+
+	_, dbErr := queries.AddUserSubscription(ctx, migrations.AddUserSubscriptionParams{
+		UserID:      userID,
+		FeatureType: featureType,
+		ExpiresAt:   pgtype.Timestamptz{Time: expiresAt, Valid: true},
+	})
+
+	if dbErr != nil {
+		log.Printf("[ERROR grantSubscription] DB Error: User=%d, Type=%s, Error=%v", userID, featureType, dbErr)
+		return fmt.Errorf("database error adding subscription %s for user %d: %w", featureType, userID, dbErr)
+	}
+
+	log.Printf("[INFO grantSubscription] Granted subscription %s to User %d, expiring at %s", featureType, userID, expiresAt.Format(time.RFC3339))
+	return nil
+}
+
+
+
+================================================
 File: pkg/handlers/imagehandler.go
 ================================================
 package handlers
@@ -4692,6 +5379,381 @@ func GeneratePresignedURLs(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string][]UploadURL{
 		"uploads": uploadURLs,
 	})
+}
+
+
+
+================================================
+File: pkg/handlers/likeHandler.go
+================================================
+package handlers
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
+	"net/http"
+	"strconv"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/arnnvv/peeple-api/migrations"
+	"github.com/arnnvv/peeple-api/pkg/db"
+	"github.com/arnnvv/peeple-api/pkg/token"
+	"github.com/arnnvv/peeple-api/pkg/utils"
+	"github.com/jackc/pgx/v5" // Import pgx specifically for pgx.ErrNoRows
+	// "github.com/jackc/pgx/v5/pgconn" // Not needed if only checking ErrNoRows
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+const dailyStandardLikeLimit = 15
+const maxCommentLength = 140
+
+// ContentLikeRequest defined...
+type ContentLikeRequest struct {
+	LikedUserID       int32                      `json:"liked_user_id"`
+	ContentType       migrations.ContentLikeType `json:"content_type"`
+	ContentIdentifier string                     `json:"content_identifier"`
+	Comment           *string                    `json:"comment,omitempty"`
+	InteractionType   *string                    `json:"interaction_type,omitempty"`
+}
+
+// LikeResponse defined...
+type LikeResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+
+// LikeHandler handles liking specific content items
+func LikeHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	ctx := r.Context()
+	queries := db.GetDB()
+	pool := db.GetPool()
+
+	if queries == nil || pool == nil {
+		log.Println("ERROR: LikeHandler: Database connection not available.")
+		utils.RespondWithJSON(w, http.StatusInternalServerError, LikeResponse{Success: false, Message: "Database connection error"})
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		utils.RespondWithJSON(w, http.StatusMethodNotAllowed, LikeResponse{Success: false, Message: "Method Not Allowed: Use POST"})
+		return
+	}
+
+	claims, ok := ctx.Value(token.ClaimsContextKey).(*token.Claims)
+	if !ok || claims == nil || claims.UserID <= 0 {
+		utils.RespondWithJSON(w, http.StatusUnauthorized, LikeResponse{Success: false, Message: "Authentication required"})
+		return
+	}
+	likerUserID := int32(claims.UserID)
+
+	likerUser, err := queries.GetUserByID(ctx, likerUserID)
+	if err != nil {
+		log.Printf("ERROR: LikeHandler: Failed to fetch liker user %d: %v", likerUserID, err)
+		utils.RespondWithJSON(w, http.StatusInternalServerError, LikeResponse{Success: false, Message: "Error fetching user data"})
+		return
+	}
+
+	var req ContentLikeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("ERROR: LikeHandler: Invalid request body for user %d: %v", likerUserID, err)
+		utils.RespondWithJSON(w, http.StatusBadRequest, LikeResponse{Success: false, Message: "Invalid request body format"})
+		return
+	}
+	defer r.Body.Close()
+
+	// --- Basic Input Validation ---
+	if req.LikedUserID <= 0 {
+		utils.RespondWithJSON(w, http.StatusBadRequest, LikeResponse{Success: false, Message: "Valid liked_user_id is required"})
+		return
+	}
+	if req.LikedUserID == likerUserID {
+		utils.RespondWithJSON(w, http.StatusBadRequest, LikeResponse{Success: false, Message: "Cannot like yourself"})
+		return
+	}
+	switch req.ContentType {
+	case migrations.ContentLikeTypeMedia, migrations.ContentLikeTypePromptStory, migrations.ContentLikeTypePromptMytype, migrations.ContentLikeTypePromptGettingpersonal, migrations.ContentLikeTypePromptDatevibes, migrations.ContentLikeTypeAudioPrompt:
+	default:
+		utils.RespondWithJSON(w, http.StatusBadRequest, LikeResponse{Success: false, Message: "Invalid content_type specified"})
+		return
+	}
+	if req.ContentIdentifier == "" {
+		utils.RespondWithJSON(w, http.StatusBadRequest, LikeResponse{Success: false, Message: "content_identifier is required"})
+		return
+	}
+
+	// --- Comment Validation ---
+	commentText := ""
+	commentProvided := false
+	if req.Comment != nil {
+		commentText = strings.TrimSpace(*req.Comment)
+		commentProvided = true
+		if utf8.RuneCountInString(commentText) > maxCommentLength {
+			utils.RespondWithJSON(w, http.StatusBadRequest, LikeResponse{Success: false, Message: fmt.Sprintf("Comment exceeds maximum length of %d characters", maxCommentLength)})
+			return
+		}
+	}
+	if likerUser.Gender.Valid && likerUser.Gender.GenderEnum == migrations.GenderEnumMan && !commentProvided {
+		utils.RespondWithJSON(w, http.StatusBadRequest, LikeResponse{Success: false, Message: "Comment is required when sending a like"})
+		return
+	}
+
+	// --- Content Existence/Index Validation (Go Code) ---
+	contentValid, validationErr := validateContentInput(ctx, queries, req.LikedUserID, req.ContentType, req.ContentIdentifier)
+	if validationErr != nil {
+		log.Printf("ERROR: LikeHandler: Error validating content input for user %d liking %d: %v", likerUserID, req.LikedUserID, validationErr)
+		utils.RespondWithJSON(w, http.StatusInternalServerError, LikeResponse{Success: false, Message: "Error validating content"})
+		return
+	}
+	if !contentValid {
+		log.Printf("WARN: LikeHandler: Content invalid/not found for user %d liking %d: Type=%s, Identifier=%s", likerUserID, req.LikedUserID, req.ContentType, req.ContentIdentifier)
+		utils.RespondWithJSON(w, http.StatusNotFound, LikeResponse{Success: false, Message: "The content you tried to like does not exist or is invalid"})
+		return
+	}
+	log.Printf("INFO: Content validation passed for like request: User=%d -> User=%d", likerUserID, req.LikedUserID)
+
+	// --- Interaction Type & Premium Checks ---
+	interactionType := migrations.LikeInteractionTypeStandard
+	if req.InteractionType != nil && strings.ToLower(*req.InteractionType) == string(migrations.LikeInteractionTypeRose) {
+		interactionType = migrations.LikeInteractionTypeRose
+	}
+
+	log.Printf("INFO: Like attempt: User=%d -> User=%d, Type=%s, Content=%s:%s, CommentPresent=%t", likerUserID, req.LikedUserID, interactionType, req.ContentType, req.ContentIdentifier, commentProvided)
+
+	addLikeParams := migrations.AddContentLikeParams{
+		LikerUserID:       likerUserID,
+		LikedUserID:       req.LikedUserID,
+		ContentType:       req.ContentType,
+		ContentIdentifier: req.ContentIdentifier,
+		Comment:           pgtype.Text{String: commentText, Valid: commentProvided},
+		InteractionType:   interactionType,
+	}
+
+	// Execute based on type
+	if interactionType == migrations.LikeInteractionTypeRose {
+		err = handleRoseLike(ctx, queries, pool, addLikeParams) // Pass pool
+		if err != nil {
+			log.Printf("ERROR: LikeHandler: Failed rose like: User=%d -> User=%d, Error=%v", likerUserID, req.LikedUserID, err)
+			status := http.StatusInternalServerError
+			msg := "Failed to process rose like"
+			if errors.Is(err, ErrInsufficientConsumables) {
+				status = http.StatusForbidden
+				msg = err.Error()
+			}
+			utils.RespondWithJSON(w, status, LikeResponse{Success: false, Message: msg})
+			return
+		}
+		utils.RespondWithJSON(w, http.StatusOK, LikeResponse{Success: true, Message: "Rose sent successfully"})
+	} else {
+		err = handleStandardLike(ctx, queries, addLikeParams)
+		if err != nil {
+			log.Printf("ERROR: LikeHandler: Failed standard like: User=%d -> User=%d, Error=%v", likerUserID, req.LikedUserID, err)
+			status := http.StatusInternalServerError
+			msg := "Failed to process like"
+			if errors.Is(err, ErrLikeLimitReached) {
+				status = http.StatusForbidden
+				msg = err.Error()
+			}
+			utils.RespondWithJSON(w, status, LikeResponse{Success: false, Message: msg})
+			return
+		}
+		utils.RespondWithJSON(w, http.StatusOK, LikeResponse{Success: true, Message: "Liked successfully"})
+	}
+}
+
+var ErrInsufficientConsumables = errors.New("insufficient consumables")
+var ErrLikeLimitReached = errors.New("daily like limit reached")
+
+// handleRoseLike checks/uses a rose and inserts the like record within a transaction.
+func handleRoseLike(ctx context.Context, queries *migrations.Queries, pool *pgxpool.Pool, params migrations.AddContentLikeParams) error {
+	consumable, err := queries.GetUserConsumable(ctx, migrations.GetUserConsumableParams{UserID: params.LikerUserID, ConsumableType: migrations.PremiumFeatureTypeRose})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrInsufficientConsumables
+		}
+		return fmt.Errorf("db error checking balance: %w", err)
+	}
+	if consumable.Quantity <= 0 {
+		return ErrInsufficientConsumables
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction error: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := queries.WithTx(tx)
+
+	_, err = qtx.DecrementUserConsumable(ctx, migrations.DecrementUserConsumableParams{UserID: params.LikerUserID, ConsumableType: migrations.PremiumFeatureTypeRose})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrInsufficientConsumables
+		}
+		return fmt.Errorf("failed to use rose: %w", err)
+	}
+
+	// *** Call AddContentLike and handle pgx.ErrNoRows for conflict ***
+	_, err = qtx.AddContentLike(ctx, params)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) { // Check for no rows when conflict happens
+			log.Printf("WARN: handleRoseLike: Like for item already exists (Conflict Triggered): User=%d -> User=%d, Type=%s, ID=%s", params.LikerUserID, params.LikedUserID, params.ContentType, params.ContentIdentifier)
+			// Conflict is not an application error in this case, treat as success
+			err = nil // Clear error
+		} else {
+			// Other DB errors
+			return fmt.Errorf("failed to record like: %w", err)
+		}
+	}
+	// If err is nil (insert succeeded or conflict handled), proceed to commit
+
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit transaction error: %w", err)
+	}
+	log.Printf("INFO: Rose like processed: User=%d -> User=%d, Content=%s:%s", params.LikerUserID, params.LikedUserID, params.ContentType, params.ContentIdentifier)
+	return nil
+}
+
+// handleStandardLike checks limits/subscriptions and inserts the like record.
+func handleStandardLike(ctx context.Context, queries *migrations.Queries, params migrations.AddContentLikeParams) error {
+	_, err := queries.GetActiveSubscription(ctx, migrations.GetActiveSubscriptionParams{UserID: params.LikerUserID, FeatureType: migrations.PremiumFeatureTypeUnlimitedLikes})
+	hasUnlimitedLikes := err == nil
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("db error checking subscription: %w", err)
+	}
+
+	if hasUnlimitedLikes {
+		log.Printf("INFO: Processing standard like (unlimited): User=%d -> User=%d", params.LikerUserID, params.LikedUserID)
+		// *** Call AddContentLike and handle pgx.ErrNoRows for conflict ***
+		_, err = queries.AddContentLike(ctx, params)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) { // Check for no rows when conflict happens
+				log.Printf("WARN: handleStandardLike (unlimited): Like for item already exists (Conflict Triggered): User=%d -> User=%d, Type=%s, ID=%s", params.LikerUserID, params.LikedUserID, params.ContentType, params.ContentIdentifier)
+				err = nil // Clear error
+			} else {
+				return fmt.Errorf("failed to record like: %w", err)
+			}
+		}
+		// If err is nil (insert succeeded or conflict handled), log success
+		if err == nil {
+			log.Printf("INFO: Standard like (unlimited) processed: User=%d -> User=%d, Content=%s:%s", params.LikerUserID, params.LikedUserID, params.ContentType, params.ContentIdentifier)
+		}
+		return err // Return nil if successful or conflict occurred, or the actual error otherwise
+	}
+
+	log.Printf("INFO: Checking daily like limit for User=%d", params.LikerUserID)
+	count, err := queries.CountRecentStandardLikes(ctx, params.LikerUserID)
+	if err != nil {
+		return fmt.Errorf("db error counting likes: %w", err)
+	}
+	if count >= dailyStandardLikeLimit {
+		log.Printf("WARN: Daily like limit reached for User=%d (%d/%d)", params.LikerUserID, count, dailyStandardLikeLimit)
+		return ErrLikeLimitReached
+	}
+
+	log.Printf("INFO: Processing standard like (limited %d/%d): User=%d -> User=%d", count, dailyStandardLikeLimit, params.LikerUserID, params.LikedUserID)
+	// *** Call AddContentLike and handle pgx.ErrNoRows for conflict ***
+	_, err = queries.AddContentLike(ctx, params)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) { // Check for no rows when conflict happens
+			log.Printf("WARN: handleStandardLike (limited): Like for item already exists (Conflict Triggered): User=%d -> User=%d, Type=%s, ID=%s", params.LikerUserID, params.LikedUserID, params.ContentType, params.ContentIdentifier)
+			err = nil // Clear error
+		} else {
+			return fmt.Errorf("failed to record like: %w", err)
+		}
+	}
+	// If err is nil (insert succeeded or conflict handled), log success
+	if err == nil {
+		log.Printf("INFO: Standard like (limited) processed: User=%d -> User=%d, Content=%s:%s", params.LikerUserID, params.LikedUserID, params.ContentType, params.ContentIdentifier)
+	}
+	return err // Return nil if successful or conflict occurred, or the actual error otherwise
+}
+
+// validateContentInput defined...
+func validateContentInput(ctx context.Context, queries *migrations.Queries, likedUserID int32, contentType migrations.ContentLikeType, contentIdentifier string) (bool, error) {
+	log.Printf("DEBUG: Validating content: User=%d, Type=%s, Identifier=%s", likedUserID, contentType, contentIdentifier)
+	likedUser, err := queries.GetUserByID(ctx, likedUserID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to fetch liked user %d: %w", likedUserID, err)
+	}
+
+	switch contentType {
+	case migrations.ContentLikeTypeMedia:
+		index, err := strconv.Atoi(contentIdentifier)
+		if err != nil {
+			log.Printf("WARN: Invalid media index '%s' for user %d: %v", contentIdentifier, likedUserID, err)
+			return false, nil
+		}
+		isValidIndex := index >= 0 && index < len(likedUser.MediaUrls)
+		if !isValidIndex {
+			log.Printf("WARN: Media index %d out of bounds for user %d (has %d media)", index, likedUserID, len(likedUser.MediaUrls))
+		}
+		return isValidIndex, nil
+	case migrations.ContentLikeTypeAudioPrompt:
+		isValid := contentIdentifier == "0" && likedUser.AudioPromptQuestion.Valid && likedUser.AudioPromptAnswer.Valid && likedUser.AudioPromptAnswer.String != ""
+		if !isValid {
+			log.Printf("WARN: Invalid audio prompt like for user %d: Identifier='%s', AudioValid=%t", likedUserID, contentIdentifier, likedUser.AudioPromptQuestion.Valid)
+		}
+		return isValid, nil
+	case migrations.ContentLikeTypePromptStory:
+		prompts, err := queries.GetUserStoryTimePrompts(ctx, likedUserID)
+		if err != nil {
+			return false, fmt.Errorf("db error fetching story prompts: %w", err)
+		}
+		for _, p := range prompts {
+			if string(p.Question) == contentIdentifier {
+				return true, nil
+			}
+		}
+		log.Printf("WARN: Story prompt '%s' not found for user %d", contentIdentifier, likedUserID)
+		return false, nil
+	case migrations.ContentLikeTypePromptMytype:
+		prompts, err := queries.GetUserMyTypePrompts(ctx, likedUserID)
+		if err != nil {
+			return false, fmt.Errorf("db error fetching mytype prompts: %w", err)
+		}
+		for _, p := range prompts {
+			if string(p.Question) == contentIdentifier {
+				return true, nil
+			}
+		}
+		log.Printf("WARN: MyType prompt '%s' not found for user %d", contentIdentifier, likedUserID)
+		return false, nil
+	case migrations.ContentLikeTypePromptGettingpersonal:
+		prompts, err := queries.GetUserGettingPersonalPrompts(ctx, likedUserID)
+		if err != nil {
+			return false, fmt.Errorf("db error fetching gettingpersonal prompts: %w", err)
+		}
+		for _, p := range prompts {
+			if string(p.Question) == contentIdentifier {
+				return true, nil
+			}
+		}
+		log.Printf("WARN: GettingPersonal prompt '%s' not found for user %d", contentIdentifier, likedUserID)
+		return false, nil
+	case migrations.ContentLikeTypePromptDatevibes:
+		prompts, err := queries.GetUserDateVibesPrompts(ctx, likedUserID)
+		if err != nil {
+			return false, fmt.Errorf("db error fetching datevibes prompts: %w", err)
+		}
+		for _, p := range prompts {
+			if string(p.Question) == contentIdentifier {
+				return true, nil
+			}
+		}
+		log.Printf("WARN: DateVibes prompt '%s' not found for user %d", contentIdentifier, likedUserID)
+		return false, nil
+	default:
+		log.Printf("ERROR: Unknown content type in validation: %s", contentType)
+		return false, fmt.Errorf("unknown content_type for validation: %s", contentType)
+	}
 }
 
 
