@@ -87,6 +87,53 @@ func (ns NullAudioPrompt) Value() (driver.Value, error) {
 	return string(ns.AudioPrompt), nil
 }
 
+// Specifies the type of profile content being liked.
+type ContentLikeType string
+
+const (
+	ContentLikeTypeMedia                 ContentLikeType = "media"
+	ContentLikeTypePromptStory           ContentLikeType = "prompt_story"
+	ContentLikeTypePromptMytype          ContentLikeType = "prompt_mytype"
+	ContentLikeTypePromptGettingpersonal ContentLikeType = "prompt_gettingpersonal"
+	ContentLikeTypePromptDatevibes       ContentLikeType = "prompt_datevibes"
+	ContentLikeTypeAudioPrompt           ContentLikeType = "audio_prompt"
+)
+
+func (e *ContentLikeType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ContentLikeType(s)
+	case string:
+		*e = ContentLikeType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ContentLikeType: %T", src)
+	}
+	return nil
+}
+
+type NullContentLikeType struct {
+	ContentLikeType ContentLikeType
+	Valid           bool // Valid is true if ContentLikeType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullContentLikeType) Scan(value interface{}) error {
+	if value == nil {
+		ns.ContentLikeType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ContentLikeType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullContentLikeType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ContentLikeType), nil
+}
+
 type DateVibesPromptType string
 
 const (
@@ -643,11 +690,8 @@ func (ns NullVerificationStatus) Value() (driver.Value, error) {
 
 // Logs each time a user is considered to have opened the app (triggered by a specific API call).
 type AppOpenLog struct {
-	// Unique identifier for the log entry.
-	ID int64
-	// The ID of the user who opened the app.
-	UserID int32
-	// The timestamp when the app open event was recorded.
+	ID       int64
+	UserID   int32
 	OpenedAt pgtype.Timestamptz
 }
 
@@ -660,12 +704,9 @@ type DateVibesPrompt struct {
 
 // Stores records of users disliking other users.
 type Dislike struct {
-	// The ID of the user performing the dislike action.
 	DislikerUserID int32
-	// The ID of the user being disliked.
 	DislikedUserID int32
-	// Timestamp when the dislike occurred.
-	CreatedAt pgtype.Timestamptz
+	CreatedAt      pgtype.Timestamptz
 }
 
 type Filter struct {
@@ -691,16 +732,20 @@ type GettingPersonalPrompt struct {
 	Answer   string
 }
 
-// Stores records of users liking other users.
+// Stores records of users liking specific content items on other users profiles, optionally with a comment.
 type Like struct {
-	// The ID of the user performing the like action.
+	ID          int32
 	LikerUserID int32
-	// The ID of the user being liked.
 	LikedUserID int32
-	// Timestamp when the like occurred.
-	CreatedAt pgtype.Timestamptz
+	// The type of content that was liked (media, prompt, audio).
+	ContentType ContentLikeType
+	// Identifier for the specific content liked (e.g., media URL, prompt question).
+	ContentIdentifier string
+	// Optional comment sent with the like (max 140 chars).
+	Comment pgtype.Text
 	// Distinguishes standard likes from premium interactions like Roses.
 	InteractionType LikeInteractionType
+	CreatedAt       pgtype.Timestamptz
 }
 
 type MyTypePrompt struct {

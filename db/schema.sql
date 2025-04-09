@@ -1,5 +1,5 @@
 -- =============================================
--- START: Original Schema Definitions
+-- START: Original Schema Definitions (Types First)
 -- =============================================
 
 -- Original ENUM Types
@@ -42,50 +42,26 @@ CREATE TYPE drinking_smoking_habits AS ENUM (
 );
 
 CREATE TYPE story_time_prompt_type AS ENUM (
-    'twoTruthsAndALie',
-    'worstIdea',
-    'biggestRisk',
-    'biggestDateFail',
-    'neverHaveIEver',
-    'bestTravelStory',
-    'weirdestGift',
-    'mostSpontaneous',
+    'twoTruthsAndALie', 'worstIdea', 'biggestRisk', 'biggestDateFail',
+    'neverHaveIEver', 'bestTravelStory', 'weirdestGift', 'mostSpontaneous',
     'oneThingNeverDoAgain'
 );
 
 CREATE TYPE my_type_prompt_type AS ENUM (
-    'nonNegotiable',
-    'hallmarkOfGoodRelationship',
-    'lookingFor',
-    'weirdlyAttractedTo',
-    'allIAskIsThatYou',
-    'wellGetAlongIf',
-    'wantSomeoneWho',
-    'greenFlags',
-    'sameTypeOfWeird',
-    'fallForYouIf',
-    'bragAboutYou'
+    'nonNegotiable', 'hallmarkOfGoodRelationship', 'lookingFor', 'weirdlyAttractedTo',
+    'allIAskIsThatYou', 'wellGetAlongIf', 'wantSomeoneWho', 'greenFlags',
+    'sameTypeOfWeird', 'fallForYouIf', 'bragAboutYou'
 );
 
 CREATE TYPE getting_personal_prompt_type AS ENUM (
-    'oneThingYouShouldKnow',
-    'loveLanguage',
-    'dorkiestThing',
-    'dontHateMeIf',
-    'geekOutOn',
-    'ifLovingThisIsWrong',
-    'keyToMyHeart',
-    'wontShutUpAbout',
-    'shouldNotGoOutWithMeIf',
-    'whatIfIToldYouThat'
+    'oneThingYouShouldKnow', 'loveLanguage', 'dorkiestThing', 'dontHateMeIf',
+    'geekOutOn', 'ifLovingThisIsWrong', 'keyToMyHeart', 'wontShutUpAbout',
+    'shouldNotGoOutWithMeIf', 'whatIfIToldYouThat'
 );
 
 CREATE TYPE date_vibes_prompt_type AS ENUM (
-    'togetherWeCould',
-    'firstRoundIsOnMeIf',
-    'whatIOrderForTheTable',
-    'bestSpotInTown',
-    'bestWayToAskMeOut'
+    'togetherWeCould', 'firstRoundIsOnMeIf', 'whatIOrderForTheTable',
+    'bestSpotInTown', 'bestWayToAskMeOut'
 );
 
 CREATE TYPE audio_prompt AS ENUM (
@@ -112,7 +88,37 @@ CREATE TYPE user_role AS ENUM (
     'admin'
 );
 
--- Original TABLE Definitions
+-- =============================================
+-- START: Premium & Like Feature Types
+-- =============================================
+
+CREATE TYPE premium_feature_type AS ENUM (
+    'unlimited_likes',
+    'travel_mode',
+    'rose',
+    'spotlight'
+);
+COMMENT ON TYPE premium_feature_type IS 'Defines the types of premium features available.';
+
+CREATE TYPE like_interaction_type AS ENUM ('standard', 'rose');
+COMMENT ON TYPE like_interaction_type IS 'Distinguishes standard likes from premium interactions like Roses.';
+
+-- NEW ENUM for content liking
+CREATE TYPE content_like_type AS ENUM (
+    'media',
+    'prompt_story',
+    'prompt_mytype',
+    'prompt_gettingpersonal',
+    'prompt_datevibes',
+    'audio_prompt'
+);
+COMMENT ON TYPE content_like_type IS 'Specifies the type of profile content being liked.';
+
+
+-- =============================================
+-- START: Table Definitions
+-- =============================================
+
 CREATE TABLE users (
     id SERIAL PRIMARY KEY,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -136,8 +142,12 @@ CREATE TABLE users (
     verification_pic TEXT,
     role user_role NOT NULL DEFAULT 'user',
     audio_prompt_question audio_prompt,
-    audio_prompt_answer TEXT
+    audio_prompt_answer TEXT,
+    spotlight_active_until TIMESTAMPTZ NULL -- From previous step
 );
+CREATE INDEX idx_users_spotlight_active ON users (spotlight_active_until) WHERE spotlight_active_until IS NOT NULL;
+COMMENT ON COLUMN users.spotlight_active_until IS 'Timestamp until which the user''s profile is boosted by Spotlight.';
+
 
 CREATE TABLE otps (
     id SERIAL PRIMARY KEY,
@@ -178,7 +188,7 @@ CREATE TABLE date_vibes_prompts (
     CONSTRAINT uq_user_date_vibes_prompts UNIQUE (user_id, question)
 );
 
--- Original Function and Trigger Definitions
+-- Function and Trigger Definitions
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -215,17 +225,13 @@ CREATE TABLE app_open_logs (
     opened_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 COMMENT ON TABLE app_open_logs IS 'Logs each time a user is considered to have opened the app (triggered by a specific API call).';
-COMMENT ON COLUMN app_open_logs.id IS 'Unique identifier for the log entry.';
-COMMENT ON COLUMN app_open_logs.user_id IS 'The ID of the user who opened the app.';
-COMMENT ON COLUMN app_open_logs.opened_at IS 'The timestamp when the app open event was recorded.';
 CREATE INDEX idx_app_open_logs_user_time ON app_open_logs (user_id, opened_at DESC);
 
 
 CREATE OR REPLACE FUNCTION haversine(lat1 float, lon1 float, lat2 float, lon2 float)
 RETURNS float AS $$
 DECLARE
-    radius float := 6371; -- Earth radius in kilometers
-    delta_lat float; delta_lon float; a float; c float; d float;
+    radius float := 6371; delta_lat float; delta_lon float; a float; c float; d float;
 BEGIN
     delta_lat := RADIANS(lat2 - lat1); delta_lon := RADIANS(lon2 - lon1);
     a := SIN(delta_lat / 2) * SIN(delta_lat / 2) + COS(RADIANS(lat1)) * COS(RADIANS(lat2)) * SIN(delta_lon / 2) * SIN(delta_lon / 2);
@@ -242,46 +248,33 @@ CREATE TABLE dislikes (
     PRIMARY KEY (disliker_user_id, disliked_user_id)
 );
 COMMENT ON TABLE dislikes IS 'Stores records of users disliking other users.';
-COMMENT ON COLUMN dislikes.disliker_user_id IS 'The ID of the user performing the dislike action.';
-COMMENT ON COLUMN dislikes.disliked_user_id IS 'The ID of the user being disliked.';
-COMMENT ON COLUMN dislikes.created_at IS 'Timestamp when the dislike occurred.';
 CREATE INDEX idx_dislikes_disliked_user ON dislikes (disliked_user_id);
 
+-- *** MODIFIED likes Table ***
 CREATE TABLE likes (
+    id SERIAL PRIMARY KEY, -- Changed PK
     liker_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     liked_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    content_type content_like_type NOT NULL DEFAULT 'media', -- Added
+    content_identifier TEXT NOT NULL DEFAULT '0', -- Added (Stores URL or prompt question enum text)
+    comment TEXT CHECK (length(comment) <= 140), -- Added, with length check
+    interaction_type like_interaction_type NOT NULL DEFAULT 'standard', -- Kept from previous step
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (liker_user_id, liked_user_id)
+
+    -- Prevent liking the exact same item twice by the same user
+    CONSTRAINT uq_like_item UNIQUE (liker_user_id, liked_user_id, content_type, content_identifier)
 );
-COMMENT ON TABLE likes IS 'Stores records of users liking other users.';
-COMMENT ON COLUMN likes.liker_user_id IS 'The ID of the user performing the like action.';
-COMMENT ON COLUMN likes.liked_user_id IS 'The ID of the user being liked.';
-COMMENT ON COLUMN likes.created_at IS 'Timestamp when the like occurred.';
-CREATE INDEX idx_likes_liked_user ON likes (liked_user_id);
+COMMENT ON TABLE likes IS 'Stores records of users liking specific content items on other users profiles, optionally with a comment.';
+COMMENT ON COLUMN likes.content_type IS 'The type of content that was liked (media, prompt, audio).';
+COMMENT ON COLUMN likes.content_identifier IS 'Identifier for the specific content liked (e.g., media URL, prompt question).';
+COMMENT ON COLUMN likes.comment IS 'Optional comment sent with the like (max 140 chars).';
+COMMENT ON COLUMN likes.interaction_type IS 'Distinguishes standard likes from premium interactions like Roses.';
+-- Existing indexes might need review, adding index on (liked_user_id, liker_user_id) might be useful for finding matches
+CREATE INDEX idx_likes_liked_user ON likes (liked_user_id); -- Kept original
+CREATE INDEX idx_likes_liker_user ON likes (liker_user_id); -- Added for fetching user's sent likes
 
--- =============================================
--- END: Original Schema Definitions
--- =============================================
 
-
--- =============================================
--- START: Additions for Premium Features
--- =============================================
-
--- Enum for distinct premium feature types
-CREATE TYPE premium_feature_type AS ENUM (
-    'unlimited_likes',
-    'travel_mode',
-    'rose',
-    'spotlight'
-);
-COMMENT ON TYPE premium_feature_type IS 'Defines the types of premium features available.';
-
--- Enum for like interaction types
-CREATE TYPE like_interaction_type AS ENUM ('standard', 'rose');
-COMMENT ON TYPE like_interaction_type IS 'Distinguishes standard likes from premium interactions like Roses.';
-
--- Table for active time-based subscriptions
+-- Premium Feature Tables (Unchanged from previous step)
 CREATE TABLE user_subscriptions (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -289,43 +282,20 @@ CREATE TABLE user_subscriptions (
     activated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     expires_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    -- Ensure this table only stores time-based features
     CHECK (feature_type IN ('unlimited_likes', 'travel_mode'))
 );
 CREATE INDEX idx_user_subscriptions_user_expires ON user_subscriptions (user_id, feature_type, expires_at);
 COMMENT ON TABLE user_subscriptions IS 'Tracks active time-based premium features for users.';
 COMMENT ON COLUMN user_subscriptions.expires_at IS 'Timestamp when the subscription benefit ends.';
 
--- Table for consumable item balances
 CREATE TABLE user_consumables (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     consumable_type premium_feature_type NOT NULL,
     quantity INTEGER NOT NULL DEFAULT 0,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), -- Track last modification
-
-    PRIMARY KEY (user_id, consumable_type), -- One row per user per consumable type
-    -- Ensure this table only stores quantity-based features
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, consumable_type),
     CHECK (consumable_type IN ('rose', 'spotlight')),
-    CHECK (quantity >= 0) -- Ensure balance doesn't go negative
+    CHECK (quantity >= 0)
 );
 COMMENT ON TABLE user_consumables IS 'Tracks the balance of quantity-based premium items (Roses, Spotlights) for users.';
 COMMENT ON COLUMN user_consumables.quantity IS 'The number of remaining items the user possesses.';
-
--- Modify the existing 'likes' table **AFTER** it's created
-ALTER TABLE likes
-ADD COLUMN interaction_type like_interaction_type NOT NULL DEFAULT 'standard';
-
--- Add an index for the new column
-CREATE INDEX idx_likes_interaction_type ON likes (interaction_type);
-COMMENT ON COLUMN likes.interaction_type IS 'Distinguishes standard likes from premium interactions like Roses.';
-
--- Modify the existing 'users' table **AFTER** it's created
-ALTER TABLE users
-ADD COLUMN spotlight_active_until TIMESTAMPTZ NULL;
-
-CREATE INDEX idx_users_spotlight_active ON users (spotlight_active_until) WHERE spotlight_active_until IS NOT NULL;
-COMMENT ON COLUMN users.spotlight_active_until IS 'Timestamp until which the user''s profile is boosted by Spotlight.';
-
--- =============================================
--- END: Additions for Premium Features
--- =============================================

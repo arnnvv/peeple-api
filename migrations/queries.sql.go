@@ -11,8 +11,58 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const addDislike = `-- name: AddDislike :exec
+const addContentLike = `-- name: AddContentLike :one
+INSERT INTO likes (
+    liker_user_id,
+    liked_user_id,
+    content_type,
+    content_identifier,
+    comment,
+    interaction_type
+) VALUES (
+    $1, $2, $3, $4, $5, $6
+)
+ON CONFLICT (liker_user_id, liked_user_id, content_type, content_identifier)
+DO NOTHING
+RETURNING id, liker_user_id, liked_user_id, content_type, content_identifier, comment, interaction_type, created_at
+`
 
+type AddContentLikeParams struct {
+	LikerUserID       int32
+	LikedUserID       int32
+	ContentType       ContentLikeType
+	ContentIdentifier string
+	Comment           pgtype.Text
+	InteractionType   LikeInteractionType
+}
+
+// Inserts a like for a specific content item, potentially with a comment.
+// content_identifier is TEXT type in the DB.
+// Prevent duplicate likes on the exact same item
+func (q *Queries) AddContentLike(ctx context.Context, arg AddContentLikeParams) (Like, error) {
+	row := q.db.QueryRow(ctx, addContentLike,
+		arg.LikerUserID,
+		arg.LikedUserID,
+		arg.ContentType,
+		arg.ContentIdentifier,
+		arg.Comment,
+		arg.InteractionType,
+	)
+	var i Like
+	err := row.Scan(
+		&i.ID,
+		&i.LikerUserID,
+		&i.LikedUserID,
+		&i.ContentType,
+		&i.ContentIdentifier,
+		&i.Comment,
+		&i.InteractionType,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const addDislike = `-- name: AddDislike :exec
 INSERT INTO dislikes (disliker_user_id, disliked_user_id)
 VALUES ($1, $2)
 ON CONFLICT (disliker_user_id, disliked_user_id) DO NOTHING
@@ -23,31 +73,8 @@ type AddDislikeParams struct {
 	DislikedUserID int32
 }
 
-// Ignore if like already exists
 func (q *Queries) AddDislike(ctx context.Context, arg AddDislikeParams) error {
 	_, err := q.db.Exec(ctx, addDislike, arg.DislikerUserID, arg.DislikedUserID)
-	return err
-}
-
-const addLike = `-- name: AddLike :exec
-
-INSERT INTO likes (liker_user_id, liked_user_id, interaction_type)
-VALUES ($1, $2, $3) -- $3 is the like_interaction_type ('standard' or 'rose')
-ON CONFLICT (liker_user_id, liked_user_id) DO NOTHING
-`
-
-type AddLikeParams struct {
-	LikerUserID     int32
-	LikedUserID     int32
-	InteractionType LikeInteractionType
-}
-
-// =============================================
-// START: Queries for Like/Dislike & Premium
-// =============================================
-// Modified to include interaction_type
-func (q *Queries) AddLike(ctx context.Context, arg AddLikeParams) error {
-	_, err := q.db.Exec(ctx, addLike, arg.LikerUserID, arg.LikedUserID, arg.InteractionType)
 	return err
 }
 
@@ -95,14 +122,10 @@ func (q *Queries) AddPhoneNumberInUsers(ctx context.Context, phoneNumber string)
 }
 
 const addUserSubscription = `-- name: AddUserSubscription :one
-
-
-
-
 INSERT INTO user_subscriptions (
-    user_id, feature_type, expires_at, activated_at -- Use default for created_at
+    user_id, feature_type, expires_at, activated_at
 ) VALUES (
-    $1, $2, $3, NOW() -- activated_at is set to now
+    $1, $2, $3, NOW()
 )
 RETURNING id, user_id, feature_type, activated_at, expires_at, created_at
 `
@@ -113,13 +136,6 @@ type AddUserSubscriptionParams struct {
 	ExpiresAt   pgtype.Timestamptz
 }
 
-// page_size (e.g., 15)
-// =============================================
-// END: Queries for Like/Dislike & Premium
-// =============================================
-// (Add this query to the end of your existing queries.sql file)
-// Adds a new subscription record for a user.
-// Assumes basic insertion; complex logic (like extending existing subs) would need more checks.
 func (q *Queries) AddUserSubscription(ctx context.Context, arg AddUserSubscriptionParams) (UserSubscription, error) {
 	row := q.db.QueryRow(ctx, addUserSubscription, arg.UserID, arg.FeatureType, arg.ExpiresAt)
 	var i UserSubscription
@@ -168,11 +184,10 @@ func (q *Queries) ClearUserMediaURLs(ctx context.Context, id int32) error {
 const countRecentStandardLikes = `-- name: CountRecentStandardLikes :one
 SELECT COUNT(*) FROM likes
 WHERE liker_user_id = $1
-  AND interaction_type = 'standard' -- Only count standard likes
+  AND interaction_type = 'standard'
   AND created_at >= NOW() - INTERVAL '24 hours'
 `
 
-// Counts standard likes sent by a user in the last 24 hours
 func (q *Queries) CountRecentStandardLikes(ctx context.Context, likerUserID int32) (int64, error) {
 	row := q.db.QueryRow(ctx, countRecentStandardLikes, likerUserID)
 	var count int64
@@ -365,7 +380,6 @@ type DecrementUserConsumableParams struct {
 }
 
 // e.g., 'rose'
-// Decrements the quantity of a consumable if available, returns the updated record
 func (q *Queries) DecrementUserConsumable(ctx context.Context, arg DecrementUserConsumableParams) (UserConsumable, error) {
 	row := q.db.QueryRow(ctx, decrementUserConsumable, arg.UserID, arg.ConsumableType)
 	var i UserConsumable
@@ -445,7 +459,7 @@ func (q *Queries) DeleteUserStoryTimePrompts(ctx context.Context, userID int32) 
 }
 
 const getActiveSubscription = `-- name: GetActiveSubscription :one
-SELECT id, user_id, feature_type, activated_at, expires_at, created_at FROM user_subscriptions -- Select all columns for the generated struct
+SELECT id, user_id, feature_type, activated_at, expires_at, created_at FROM user_subscriptions
 WHERE user_id = $1
   AND feature_type = $2 -- e.g., 'unlimited_likes'
   AND expires_at > NOW()
@@ -457,7 +471,6 @@ type GetActiveSubscriptionParams struct {
 	FeatureType PremiumFeatureType
 }
 
-// Checks if a user has a specific *active* subscription
 func (q *Queries) GetActiveSubscription(ctx context.Context, arg GetActiveSubscriptionParams) (UserSubscription, error) {
 	row := q.db.QueryRow(ctx, getActiveSubscription, arg.UserID, arg.FeatureType)
 	var i UserSubscription
@@ -475,77 +488,37 @@ func (q *Queries) GetActiveSubscription(ctx context.Context, arg GetActiveSubscr
 const getHomeFeed = `-- name: GetHomeFeed :many
 WITH RequestingUser AS (
     SELECT
-        u.id,
-        u.latitude,
-        u.longitude,
-        u.gender,
-        u.date_of_birth,
-        u.spotlight_active_until -- Added for sorting checks
-    FROM users u
-    WHERE u.id = $1 -- requesting_user_id
+        u.id, u.latitude, u.longitude, u.gender, u.date_of_birth, u.spotlight_active_until
+    FROM users u WHERE u.id = $1
 ), RequestingUserFilters AS (
     SELECT
-        f.user_id,
-        f.who_you_want_to_see,
-        f.radius_km,
-        f.active_today,
-        f.age_min,
-        f.age_max
-    FROM filters f
-    WHERE f.user_id = $1 -- requesting_user_id
+        f.user_id, f.who_you_want_to_see, f.radius_km, f.active_today, f.age_min, f.age_max
+    FROM filters f WHERE f.user_id = $1
 )
 SELECT
-    -- Explicitly list columns from users to avoid ambiguity if joins added later
-    target_user.id, target_user.created_at, target_user.name, target_user.last_name,
-    target_user.phone_number, target_user.date_of_birth, target_user.latitude,
-    target_user.longitude, target_user.gender, target_user.dating_intention, target_user.height,
-    target_user.hometown, target_user.job_title, target_user.education,
-    target_user.religious_beliefs, target_user.drinking_habit, target_user.smoking_habit,
-    target_user.media_urls, target_user.verification_status, target_user.verification_pic,
-    target_user.role, target_user.audio_prompt_question, target_user.audio_prompt_answer,
-    target_user.spotlight_active_until, -- Include spotlight status
-    -- Calculated distance
+    target_user.id, target_user.created_at, target_user.name, target_user.last_name, target_user.phone_number, target_user.date_of_birth, target_user.latitude, target_user.longitude, target_user.gender, target_user.dating_intention, target_user.height, target_user.hometown, target_user.job_title, target_user.education, target_user.religious_beliefs, target_user.drinking_habit, target_user.smoking_habit, target_user.media_urls, target_user.verification_status, target_user.verification_pic, target_user.role, target_user.audio_prompt_question, target_user.audio_prompt_answer, target_user.spotlight_active_until,
     haversine(ru.latitude, ru.longitude, target_user.latitude, target_user.longitude) AS distance_km
 FROM users AS target_user
-JOIN RequestingUser ru ON target_user.id != ru.id -- Don't show self
-JOIN RequestingUserFilters rf ON ru.id = rf.user_id -- Ensure requesting user has filters (or defaults were just created)
-LEFT JOIN filters AS target_user_filters ON target_user.id = target_user_filters.user_id -- Filters of the potential match
+JOIN RequestingUser ru ON target_user.id != ru.id
+JOIN RequestingUserFilters rf ON ru.id = rf.user_id
+LEFT JOIN filters AS target_user_filters ON target_user.id = target_user_filters.user_id
 WHERE
-    -- Location Check: target user must have location
     target_user.latitude IS NOT NULL AND target_user.longitude IS NOT NULL
-    -- Radius Check: target user must be within radius OR radius filter is not set
     AND (rf.radius_km IS NULL OR haversine(ru.latitude, ru.longitude, target_user.latitude, target_user.longitude) <= rf.radius_km)
-
-    -- Gender Preference Check (Requesting User's Preference)
     AND target_user.gender = rf.who_you_want_to_see
-
-    -- Gender Preference Check (Target User's Preference - Reciprocal)
-    -- Make reciprocal check optional or handle NULL target filters gracefully
     AND (target_user_filters.user_id IS NULL OR target_user_filters.who_you_want_to_see IS NULL OR target_user_filters.who_you_want_to_see = ru.gender)
-
-    -- Age Check: target user's age must be within requesting user's filter range
     AND target_user.date_of_birth IS NOT NULL
     AND EXTRACT(YEAR FROM AGE(target_user.date_of_birth)) BETWEEN rf.age_min AND rf.age_max
-
-    -- Active Today Check (only if filter is enabled)
     AND (NOT rf.active_today OR EXISTS (
             SELECT 1 FROM app_open_logs aol
             WHERE aol.user_id = target_user.id AND aol.opened_at >= NOW() - INTERVAL '24 hours'
         ))
-
-    -- Dislike Checks (Neither user disliked the other)
     AND NOT EXISTS (SELECT 1 FROM dislikes d WHERE d.disliker_user_id = ru.id AND d.disliked_user_id = target_user.id)
     AND NOT EXISTS (SELECT 1 FROM dislikes d WHERE d.disliker_user_id = target_user.id AND d.disliked_user_id = ru.id)
-
-    -- Like Check (Requesting user has NOT liked the target user)
-    AND NOT EXISTS (SELECT 1 FROM likes l WHERE l.liker_user_id = ru.id AND l.liked_user_id = target_user.id) -- Unchanged
-
+    AND NOT EXISTS (SELECT 1 FROM likes l WHERE l.liker_user_id = ru.id AND l.liked_user_id = target_user.id)
 ORDER BY
-    -- Spotlight Boost: Users with active spotlight appear first
     CASE WHEN target_user.spotlight_active_until > NOW() THEN 0 ELSE 1 END ASC,
-    -- Then by distance
     distance_km ASC,
-    -- Then by age difference
     ABS(EXTRACT(YEAR FROM AGE(ru.date_of_birth)) - EXTRACT(YEAR FROM AGE(target_user.date_of_birth))) ASC NULLS LAST
 LIMIT $2
 `
@@ -583,7 +556,6 @@ type GetHomeFeedRow struct {
 	DistanceKm           float64
 }
 
-// Modified ORDER BY clause to potentially include spotlight later
 func (q *Queries) GetHomeFeed(ctx context.Context, arg GetHomeFeedParams) ([]GetHomeFeedRow, error) {
 	rows, err := q.db.Query(ctx, getHomeFeed, arg.ID, arg.Limit)
 	if err != nil {
@@ -793,7 +765,7 @@ func (q *Queries) GetUserByPhone(ctx context.Context, phoneNumber string) (User,
 }
 
 const getUserConsumable = `-- name: GetUserConsumable :one
-SELECT user_id, consumable_type, quantity, updated_at FROM user_consumables -- Select all columns for the generated struct
+SELECT user_id, consumable_type, quantity, updated_at FROM user_consumables
 WHERE user_id = $1
   AND consumable_type = $2
 `
@@ -803,7 +775,6 @@ type GetUserConsumableParams struct {
 	ConsumableType PremiumFeatureType
 }
 
-// Gets the current quantity of a specific consumable for a user
 func (q *Queries) GetUserConsumable(ctx context.Context, arg GetUserConsumableParams) (UserConsumable, error) {
 	row := q.db.QueryRow(ctx, getUserConsumable, arg.UserID, arg.ConsumableType)
 	var i UserConsumable
@@ -1241,7 +1212,6 @@ type UpsertUserConsumableParams struct {
 	Quantity       int32
 }
 
-// Adds quantity to a user's consumable balance (used when purchasing)
 func (q *Queries) UpsertUserConsumable(ctx context.Context, arg UpsertUserConsumableParams) (UserConsumable, error) {
 	row := q.db.QueryRow(ctx, upsertUserConsumable, arg.UserID, arg.ConsumableType, arg.Quantity)
 	var i UserConsumable
