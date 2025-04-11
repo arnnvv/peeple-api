@@ -50,7 +50,7 @@ func main() {
 	http.HandleFunc("/api/like", token.AuthMiddleware(handlers.LikeHandler))
 	http.HandleFunc("/api/dislike", token.AuthMiddleware(handlers.DislikeHandler))
 	http.HandleFunc("/api/iap/verify", token.AuthMiddleware(handlers.VerifyPurchaseHandler))
-	http.HandleFunc("/chat", handlers.ChatHandler)
+	http.HandleFunc("/chat", token.AuthMiddleware(handlers.ChatHandler))
 
 	go cleanupExpiredOTPs()
 
@@ -61,11 +61,8 @@ func main() {
 }
 
 func cleanupExpiredOTPs() {
-	for db.GetDB() == nil {
-		log.Println("Waiting for DB initialization before starting OTP cleanup...")
-		time.Sleep(2 * time.Second)
-	}
-	log.Println("DB initialized, starting OTP cleanup routine.")
+	time.Sleep(5 * time.Second)
+	log.Println("Starting OTP cleanup routine check...")
 
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
@@ -81,7 +78,7 @@ func cleanupExpiredOTPs() {
 				log.Println("OTP cleanup finished.")
 			}
 		} else {
-			log.Println("Skipping OTP cleanup run, DB connection not available.")
+			log.Println("Skipping OTP cleanup run, DB connection not available (queries object is nil).")
 		}
 	}
 }
