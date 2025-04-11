@@ -291,3 +291,9 @@ DO NOTHING
 RETURNING *;
 
 -- Removed Check...Exists queries as validation moves to Go code
+
+-- name: CheckLikeExists :one
+SELECT EXISTS (
+    SELECT 1 FROM likes
+    WHERE liker_user_id = $1 AND liked_user_id = $2
+);

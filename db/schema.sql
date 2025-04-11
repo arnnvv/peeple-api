@@ -299,3 +299,23 @@ CREATE TABLE user_consumables (
 );
 COMMENT ON TABLE user_consumables IS 'Tracks the balance of quantity-based premium items (Roses, Spotlights) for users.';
 COMMENT ON COLUMN user_consumables.quantity IS 'The number of remaining items the user possesses.';
+
+CREATE TABLE chat_messages (
+    id BIGSERIAL PRIMARY KEY,
+    sender_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    recipient_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    message_text TEXT NOT NULL CHECK (length(message_text) > 0 AND length(message_text) <= 5000),
+    sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    is_read BOOLEAN NOT NULL DEFAULT false,
+    CONSTRAINT chk_sender_recipient_different CHECK (sender_user_id <> recipient_user_id)
+);
+COMMENT ON TABLE chat_messages IS 'Stores individual chat messages between users.';
+COMMENT ON COLUMN chat_messages.sender_user_id IS 'The ID of the user who sent the message.';
+COMMENT ON COLUMN chat_messages.recipient_user_id IS 'The ID of the user who should receive the message.';
+COMMENT ON COLUMN chat_messages.message_text IS 'The content of the chat message.';
+COMMENT ON COLUMN chat_messages.sent_at IS 'Timestamp when the message was sent.';
+COMMENT ON COLUMN chat_messages.is_read IS 'Flag indicating if the recipient has marked the message as read.';
+
+CREATE INDEX idx_chat_messages_conversation ON chat_messages (sender_user_id, recipient_user_id, sent_at DESC);
+CREATE INDEX idx_chat_messages_recipient_time ON chat_messages (recipient_user_id, sent_at DESC);
+CREATE INDEX idx_chat_messages_recipient_unread ON chat_messages (recipient_user_id, is_read) WHERE is_read = false;

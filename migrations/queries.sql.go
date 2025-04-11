@@ -150,6 +150,27 @@ func (q *Queries) AddUserSubscription(ctx context.Context, arg AddUserSubscripti
 	return i, err
 }
 
+const checkLikeExists = `-- name: CheckLikeExists :one
+
+SELECT EXISTS (
+    SELECT 1 FROM likes
+    WHERE liker_user_id = $1 AND liked_user_id = $2
+)
+`
+
+type CheckLikeExistsParams struct {
+	LikerUserID int32
+	LikedUserID int32
+}
+
+// Removed Check...Exists queries as validation moves to Go code
+func (q *Queries) CheckLikeExists(ctx context.Context, arg CheckLikeExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, checkLikeExists, arg.LikerUserID, arg.LikedUserID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const cleanOTP = `-- name: CleanOTP :exec
 DELETE FROM otps
 WHERE expires_at < NOW()
