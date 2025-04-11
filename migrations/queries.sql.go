@@ -36,9 +36,6 @@ type AddContentLikeParams struct {
 	InteractionType   LikeInteractionType
 }
 
-// Inserts a like for a specific content item, potentially with a comment.
-// content_identifier is TEXT type in the DB.
-// Prevent duplicate likes on the exact same item
 func (q *Queries) AddContentLike(ctx context.Context, arg AddContentLikeParams) (Like, error) {
 	row := q.db.QueryRow(ctx, addContentLike,
 		arg.LikerUserID,
@@ -78,49 +75,6 @@ func (q *Queries) AddDislike(ctx context.Context, arg AddDislikeParams) error {
 	return err
 }
 
-const addPhoneNumberInUsers = `-- name: AddPhoneNumberInUsers :one
-
-INSERT INTO users (
-    phone_number
-) VALUES (
-    $1
-)
-RETURNING id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until
-`
-
-// $1 should be 'pending'
-func (q *Queries) AddPhoneNumberInUsers(ctx context.Context, phoneNumber string) (User, error) {
-	row := q.db.QueryRow(ctx, addPhoneNumberInUsers, phoneNumber)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.CreatedAt,
-		&i.Name,
-		&i.LastName,
-		&i.PhoneNumber,
-		&i.DateOfBirth,
-		&i.Latitude,
-		&i.Longitude,
-		&i.Gender,
-		&i.DatingIntention,
-		&i.Height,
-		&i.Hometown,
-		&i.JobTitle,
-		&i.Education,
-		&i.ReligiousBeliefs,
-		&i.DrinkingHabit,
-		&i.SmokingHabit,
-		&i.MediaUrls,
-		&i.VerificationStatus,
-		&i.VerificationPic,
-		&i.Role,
-		&i.AudioPromptQuestion,
-		&i.AudioPromptAnswer,
-		&i.SpotlightActiveUntil,
-	)
-	return i, err
-}
-
 const addUserSubscription = `-- name: AddUserSubscription :one
 INSERT INTO user_subscriptions (
     user_id, feature_type, expires_at, activated_at
@@ -150,32 +104,13 @@ func (q *Queries) AddUserSubscription(ctx context.Context, arg AddUserSubscripti
 	return i, err
 }
 
-const cleanOTP = `-- name: CleanOTP :exec
-DELETE FROM otps
-WHERE expires_at < NOW()
-`
-
-func (q *Queries) CleanOTP(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, cleanOTP)
-	return err
-}
-
-const cleanOTPs = `-- name: CleanOTPs :exec
-DELETE FROM otps
-WHERE expires_at < NOW()
-`
-
-func (q *Queries) CleanOTPs(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, cleanOTPs)
-	return err
-}
-
 const clearUserMediaURLs = `-- name: ClearUserMediaURLs :exec
 UPDATE users
 SET media_urls = '{}'
 WHERE id = $1
 `
 
+// Removes all media URLs for a user.
 func (q *Queries) ClearUserMediaURLs(ctx context.Context, id int32) error {
 	_, err := q.db.Exec(ctx, clearUserMediaURLs, id)
 	return err
@@ -267,32 +202,6 @@ func (q *Queries) CreateMyTypePrompt(ctx context.Context, arg CreateMyTypePrompt
 	return i, err
 }
 
-const createOTP = `-- name: CreateOTP :one
-INSERT INTO otps (
-    user_id, otp_code
-) VALUES (
-    $1, $2
-)
-RETURNING id, user_id, otp_code, expires_at
-`
-
-type CreateOTPParams struct {
-	UserID  int32
-	OtpCode string
-}
-
-func (q *Queries) CreateOTP(ctx context.Context, arg CreateOTPParams) (Otp, error) {
-	row := q.db.QueryRow(ctx, createOTP, arg.UserID, arg.OtpCode)
-	var i Otp
-	err := row.Scan(
-		&i.ID,
-		&i.UserID,
-		&i.OtpCode,
-		&i.ExpiresAt,
-	)
-	return i, err
-}
-
 const createStoryTimePrompt = `-- name: CreateStoryTimePrompt :one
 INSERT INTO story_time_prompts (user_id, question, answer)
 VALUES ($1, $2, $3)
@@ -317,29 +226,25 @@ func (q *Queries) CreateStoryTimePrompt(ctx context.Context, arg CreateStoryTime
 	return i, err
 }
 
-const createUserMinimal = `-- name: CreateUserMinimal :one
+const createUserWithEmail = `-- name: CreateUserWithEmail :one
 INSERT INTO users (
-    phone_number, gender
+    email
 ) VALUES (
-    $1, $2
+    $1
 )
-RETURNING id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until
+RETURNING id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until
 `
 
-type CreateUserMinimalParams struct {
-	PhoneNumber string
-	Gender      NullGenderEnum
-}
-
-func (q *Queries) CreateUserMinimal(ctx context.Context, arg CreateUserMinimalParams) (User, error) {
-	row := q.db.QueryRow(ctx, createUserMinimal, arg.PhoneNumber, arg.Gender)
+// Creates a new user with only their email address initially.
+func (q *Queries) CreateUserWithEmail(ctx context.Context, email string) (User, error) {
+	row := q.db.QueryRow(ctx, createUserWithEmail, email)
 	var i User
 	err := row.Scan(
 		&i.ID,
 		&i.CreatedAt,
 		&i.Name,
 		&i.LastName,
-		&i.PhoneNumber,
+		&i.Email,
 		&i.DateOfBirth,
 		&i.Latitude,
 		&i.Longitude,
@@ -390,36 +295,6 @@ func (q *Queries) DecrementUserConsumable(ctx context.Context, arg DecrementUser
 		&i.UpdatedAt,
 	)
 	return i, err
-}
-
-const deleteOTPByID = `-- name: DeleteOTPByID :exec
-DELETE FROM otps
-WHERE id = $1
-`
-
-func (q *Queries) DeleteOTPByID(ctx context.Context, id int32) error {
-	_, err := q.db.Exec(ctx, deleteOTPByID, id)
-	return err
-}
-
-const deleteOTPByUser = `-- name: DeleteOTPByUser :exec
-DELETE FROM otps
-WHERE user_id = $1
-`
-
-func (q *Queries) DeleteOTPByUser(ctx context.Context, userID int32) error {
-	_, err := q.db.Exec(ctx, deleteOTPByUser, userID)
-	return err
-}
-
-const deleteOTPsByPhoneNumber = `-- name: DeleteOTPsByPhoneNumber :exec
-DELETE FROM otps
-WHERE user_id = (SELECT id FROM users WHERE phone_number = $1)
-`
-
-func (q *Queries) DeleteOTPsByPhoneNumber(ctx context.Context, phoneNumber string) error {
-	_, err := q.db.Exec(ctx, deleteOTPsByPhoneNumber, phoneNumber)
-	return err
 }
 
 const deleteUserDateVibesPrompts = `-- name: DeleteUserDateVibesPrompts :exec
@@ -496,17 +371,21 @@ WITH RequestingUser AS (
     FROM filters f WHERE f.user_id = $1
 )
 SELECT
-    target_user.id, target_user.created_at, target_user.name, target_user.last_name, target_user.phone_number, target_user.date_of_birth, target_user.latitude, target_user.longitude, target_user.gender, target_user.dating_intention, target_user.height, target_user.hometown, target_user.job_title, target_user.education, target_user.religious_beliefs, target_user.drinking_habit, target_user.smoking_habit, target_user.media_urls, target_user.verification_status, target_user.verification_pic, target_user.role, target_user.audio_prompt_question, target_user.audio_prompt_answer, target_user.spotlight_active_until,
+    target_user.id, target_user.created_at, target_user.name, target_user.last_name, target_user.email, target_user.date_of_birth, target_user.latitude, target_user.longitude, target_user.gender, target_user.dating_intention, target_user.height, target_user.hometown, target_user.job_title, target_user.education, target_user.religious_beliefs, target_user.drinking_habit, target_user.smoking_habit, target_user.media_urls, target_user.verification_status, target_user.verification_pic, target_user.role, target_user.audio_prompt_question, target_user.audio_prompt_answer, target_user.spotlight_active_until,
     haversine(ru.latitude, ru.longitude, target_user.latitude, target_user.longitude) AS distance_km
 FROM users AS target_user
 JOIN RequestingUser ru ON target_user.id != ru.id
 JOIN RequestingUserFilters rf ON ru.id = rf.user_id
 LEFT JOIN filters AS target_user_filters ON target_user.id = target_user_filters.user_id
 WHERE
-    target_user.latitude IS NOT NULL AND target_user.longitude IS NOT NULL
+    target_user.latitude IS NOT NULL AND target_user.longitude IS NOT NULL -- Ensure target has location
+    AND ru.latitude IS NOT NULL AND ru.longitude IS NOT NULL             -- Ensure requesting user has location
+    AND ru.gender IS NOT NULL                                             -- Ensure requesting user has gender set
+    AND rf.who_you_want_to_see IS NOT NULL                                -- Ensure filter preference is set
+    AND rf.age_min IS NOT NULL AND rf.age_max IS NOT NULL                 -- Ensure age filters are set
     AND (rf.radius_km IS NULL OR haversine(ru.latitude, ru.longitude, target_user.latitude, target_user.longitude) <= rf.radius_km)
-    AND target_user.gender = rf.who_you_want_to_see
-    AND (target_user_filters.user_id IS NULL OR target_user_filters.who_you_want_to_see IS NULL OR target_user_filters.who_you_want_to_see = ru.gender)
+    AND target_user.gender = rf.who_you_want_to_see -- Target gender matches filter
+    AND (target_user_filters.user_id IS NULL OR target_user_filters.who_you_want_to_see IS NULL OR target_user_filters.who_you_want_to_see = ru.gender) -- Target preferences allow requesting user's gender
     AND target_user.date_of_birth IS NOT NULL
     AND EXTRACT(YEAR FROM AGE(target_user.date_of_birth)) BETWEEN rf.age_min AND rf.age_max
     AND (NOT rf.active_today OR EXISTS (
@@ -517,9 +396,14 @@ WHERE
     AND NOT EXISTS (SELECT 1 FROM dislikes d WHERE d.disliker_user_id = target_user.id AND d.disliked_user_id = ru.id)
     AND NOT EXISTS (SELECT 1 FROM likes l WHERE l.liker_user_id = ru.id AND l.liked_user_id = target_user.id)
 ORDER BY
-    CASE WHEN target_user.spotlight_active_until > NOW() THEN 0 ELSE 1 END ASC,
+    CASE WHEN target_user.spotlight_active_until > NOW() THEN 0 ELSE 1 END ASC, -- Spotlight users first
     distance_km ASC,
-    ABS(EXTRACT(YEAR FROM AGE(ru.date_of_birth)) - EXTRACT(YEAR FROM AGE(target_user.date_of_birth))) ASC NULLS LAST
+    -- Use age difference calculation only if requesting user DOB is set
+    CASE WHEN ru.date_of_birth IS NOT NULL THEN
+      ABS(EXTRACT(YEAR FROM AGE(ru.date_of_birth)) - EXTRACT(YEAR FROM AGE(target_user.date_of_birth)))
+    ELSE
+      NULL -- Or some other default ordering if DOB is missing
+    END ASC NULLS LAST
 LIMIT $2
 `
 
@@ -533,7 +417,7 @@ type GetHomeFeedRow struct {
 	CreatedAt            pgtype.Timestamptz
 	Name                 pgtype.Text
 	LastName             pgtype.Text
-	PhoneNumber          string
+	Email                string
 	DateOfBirth          pgtype.Date
 	Latitude             pgtype.Float8
 	Longitude            pgtype.Float8
@@ -556,6 +440,7 @@ type GetHomeFeedRow struct {
 	DistanceKm           float64
 }
 
+// Retrieves the main feed based on user filters and location.
 func (q *Queries) GetHomeFeed(ctx context.Context, arg GetHomeFeedParams) ([]GetHomeFeedRow, error) {
 	rows, err := q.db.Query(ctx, getHomeFeed, arg.ID, arg.Limit)
 	if err != nil {
@@ -570,7 +455,7 @@ func (q *Queries) GetHomeFeed(ctx context.Context, arg GetHomeFeedParams) ([]Get
 			&i.CreatedAt,
 			&i.Name,
 			&i.LastName,
-			&i.PhoneNumber,
+			&i.Email,
 			&i.DateOfBirth,
 			&i.Latitude,
 			&i.Longitude,
@@ -624,7 +509,6 @@ type GetLikeDetailsRow struct {
 }
 
 // Then by time
-// Fetches specific details of a single like interaction.
 func (q *Queries) GetLikeDetails(ctx context.Context, arg GetLikeDetailsParams) (GetLikeDetailsRow, error) {
 	row := q.db.QueryRow(ctx, getLikeDetails, arg.LikerUserID, arg.LikedUserID)
 	var i GetLikeDetailsRow
@@ -633,9 +517,6 @@ func (q *Queries) GetLikeDetails(ctx context.Context, arg GetLikeDetailsParams) 
 }
 
 const getLikersForUser = `-- name: GetLikersForUser :many
-
-
-
 SELECT
     l.liker_user_id,
     l.comment,
@@ -662,10 +543,6 @@ type GetLikersForUserRow struct {
 	MediaUrls       []string
 }
 
-// Removed Check...Exists queries as validation moves to Go code
-// db/queries.sql
-// ... (keep existing queries) ...
-// Fetches basic details of users who liked a specific user, ordered by Rose and then time.
 func (q *Queries) GetLikersForUser(ctx context.Context, likedUserID int32) ([]GetLikersForUserRow, error) {
 	rows, err := q.db.Query(ctx, getLikersForUser, likedUserID)
 	if err != nil {
@@ -694,30 +571,12 @@ func (q *Queries) GetLikersForUser(ctx context.Context, likedUserID int32) ([]Ge
 	return items, nil
 }
 
-const getOTPByUser = `-- name: GetOTPByUser :one
-SELECT id, user_id, otp_code, expires_at FROM otps
-WHERE user_id = $1
-ORDER BY id DESC
-LIMIT 1
-`
-
-func (q *Queries) GetOTPByUser(ctx context.Context, userID int32) (Otp, error) {
-	row := q.db.QueryRow(ctx, getOTPByUser, userID)
-	var i Otp
-	err := row.Scan(
-		&i.ID,
-		&i.UserID,
-		&i.OtpCode,
-		&i.ExpiresAt,
-	)
-	return i, err
-}
-
 const getPendingVerificationUsers = `-- name: GetPendingVerificationUsers :many
-SELECT id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until FROM users
+SELECT id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until FROM users
 WHERE verification_status = $1
 `
 
+// Fetches users whose verification status is 'pending'.
 func (q *Queries) GetPendingVerificationUsers(ctx context.Context, verificationStatus VerificationStatus) ([]User, error) {
 	rows, err := q.db.Query(ctx, getPendingVerificationUsers, verificationStatus)
 	if err != nil {
@@ -732,7 +591,7 @@ func (q *Queries) GetPendingVerificationUsers(ctx context.Context, verificationS
 			&i.CreatedAt,
 			&i.Name,
 			&i.LastName,
-			&i.PhoneNumber,
+			&i.Email,
 			&i.DateOfBirth,
 			&i.Latitude,
 			&i.Longitude,
@@ -763,6 +622,115 @@ func (q *Queries) GetPendingVerificationUsers(ctx context.Context, verificationS
 	return items, nil
 }
 
+const getQuickFeed = `-- name: GetQuickFeed :many
+
+SELECT
+    target_user.id, target_user.created_at, target_user.name, target_user.last_name, target_user.email, target_user.date_of_birth, target_user.latitude, target_user.longitude, target_user.gender, target_user.dating_intention, target_user.height, target_user.hometown, target_user.job_title, target_user.education, target_user.religious_beliefs, target_user.drinking_habit, target_user.smoking_habit, target_user.media_urls, target_user.verification_status, target_user.verification_pic, target_user.role, target_user.audio_prompt_question, target_user.audio_prompt_answer, target_user.spotlight_active_until,
+    haversine($1, $2, target_user.latitude, target_user.longitude) AS distance_km
+FROM users AS target_user
+WHERE
+      target_user.id != $3 -- Exclude self
+  AND target_user.latitude IS NOT NULL
+  AND target_user.longitude IS NOT NULL
+  AND target_user.gender = $4 -- Filter by the OPPOSITE gender passed as param
+  AND target_user.name IS NOT NULL AND target_user.name != '' -- Basic profile check
+  AND target_user.date_of_birth IS NOT NULL                  -- Basic profile check
+ORDER BY
+    distance_km ASC
+LIMIT $5
+`
+
+type GetQuickFeedParams struct {
+	Lat1   float64
+	Lon1   float64
+	ID     int32
+	Gender NullGenderEnum
+	Limit  int32
+}
+
+type GetQuickFeedRow struct {
+	ID                   int32
+	CreatedAt            pgtype.Timestamptz
+	Name                 pgtype.Text
+	LastName             pgtype.Text
+	Email                string
+	DateOfBirth          pgtype.Date
+	Latitude             pgtype.Float8
+	Longitude            pgtype.Float8
+	Gender               NullGenderEnum
+	DatingIntention      NullDatingIntention
+	Height               pgtype.Float8
+	Hometown             pgtype.Text
+	JobTitle             pgtype.Text
+	Education            pgtype.Text
+	ReligiousBeliefs     NullReligion
+	DrinkingHabit        NullDrinkingSmokingHabits
+	SmokingHabit         NullDrinkingSmokingHabits
+	MediaUrls            []string
+	VerificationStatus   VerificationStatus
+	VerificationPic      pgtype.Text
+	Role                 UserRole
+	AudioPromptQuestion  NullAudioPrompt
+	AudioPromptAnswer    pgtype.Text
+	SpotlightActiveUntil pgtype.Timestamptz
+	DistanceKm           float64
+}
+
+// Param $2 is the feed batch size (e.g., 15)
+// Retrieves a small feed based purely on proximity and opposite gender.
+// Parameters: $1=latitude, $2=longitude (of requesting user), $3=requesting_user_id, $4=gender_to_show, $5=limit
+func (q *Queries) GetQuickFeed(ctx context.Context, arg GetQuickFeedParams) ([]GetQuickFeedRow, error) {
+	rows, err := q.db.Query(ctx, getQuickFeed,
+		arg.Lat1,
+		arg.Lon1,
+		arg.ID,
+		arg.Gender,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetQuickFeedRow
+	for rows.Next() {
+		var i GetQuickFeedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CreatedAt,
+			&i.Name,
+			&i.LastName,
+			&i.Email,
+			&i.DateOfBirth,
+			&i.Latitude,
+			&i.Longitude,
+			&i.Gender,
+			&i.DatingIntention,
+			&i.Height,
+			&i.Hometown,
+			&i.JobTitle,
+			&i.Education,
+			&i.ReligiousBeliefs,
+			&i.DrinkingHabit,
+			&i.SmokingHabit,
+			&i.MediaUrls,
+			&i.VerificationStatus,
+			&i.VerificationPic,
+			&i.Role,
+			&i.AudioPromptQuestion,
+			&i.AudioPromptAnswer,
+			&i.SpotlightActiveUntil,
+			&i.DistanceKm,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getUserAudioPrompt = `-- name: GetUserAudioPrompt :one
 SELECT id, audio_prompt_question, audio_prompt_answer
 FROM users
@@ -782,20 +750,20 @@ func (q *Queries) GetUserAudioPrompt(ctx context.Context, id int32) (GetUserAudi
 	return i, err
 }
 
-const getUserByID = `-- name: GetUserByID :one
-SELECT id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until FROM users
-WHERE id = $1 LIMIT 1
+const getUserByEmail = `-- name: GetUserByEmail :one
+SELECT id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until FROM users
+WHERE email = $1 LIMIT 1
 `
 
-func (q *Queries) GetUserByID(ctx context.Context, id int32) (User, error) {
-	row := q.db.QueryRow(ctx, getUserByID, id)
+func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByEmail, email)
 	var i User
 	err := row.Scan(
 		&i.ID,
 		&i.CreatedAt,
 		&i.Name,
 		&i.LastName,
-		&i.PhoneNumber,
+		&i.Email,
 		&i.DateOfBirth,
 		&i.Latitude,
 		&i.Longitude,
@@ -819,20 +787,22 @@ func (q *Queries) GetUserByID(ctx context.Context, id int32) (User, error) {
 	return i, err
 }
 
-const getUserByPhone = `-- name: GetUserByPhone :one
-SELECT id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until FROM users
-WHERE phone_number = $1 LIMIT 1
+const getUserByID = `-- name: GetUserByID :one
+
+SELECT id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until FROM users
+WHERE id = $1 LIMIT 1
 `
 
-func (q *Queries) GetUserByPhone(ctx context.Context, phoneNumber string) (User, error) {
-	row := q.db.QueryRow(ctx, getUserByPhone, phoneNumber)
+// FILE: db/queries.sql
+func (q *Queries) GetUserByID(ctx context.Context, id int32) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByID, id)
 	var i User
 	err := row.Scan(
 		&i.ID,
 		&i.CreatedAt,
 		&i.Name,
 		&i.LastName,
-		&i.PhoneNumber,
+		&i.Email,
 		&i.DateOfBirth,
 		&i.Latitude,
 		&i.Longitude,
@@ -1052,6 +1022,60 @@ func (q *Queries) UpdateAudioPrompt(ctx context.Context, arg UpdateAudioPromptPa
 	return i, err
 }
 
+const updateUserLocationGender = `-- name: UpdateUserLocationGender :one
+UPDATE users SET
+    latitude = $1,
+    longitude = $2,
+    gender = $3
+WHERE id = $4
+RETURNING id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until
+`
+
+type UpdateUserLocationGenderParams struct {
+	Latitude  pgtype.Float8
+	Longitude pgtype.Float8
+	Gender    NullGenderEnum
+	ID        int32
+}
+
+// Updates only the user's latitude, longitude, and gender.
+func (q *Queries) UpdateUserLocationGender(ctx context.Context, arg UpdateUserLocationGenderParams) (User, error) {
+	row := q.db.QueryRow(ctx, updateUserLocationGender,
+		arg.Latitude,
+		arg.Longitude,
+		arg.Gender,
+		arg.ID,
+	)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.Name,
+		&i.LastName,
+		&i.Email,
+		&i.DateOfBirth,
+		&i.Latitude,
+		&i.Longitude,
+		&i.Gender,
+		&i.DatingIntention,
+		&i.Height,
+		&i.Hometown,
+		&i.JobTitle,
+		&i.Education,
+		&i.ReligiousBeliefs,
+		&i.DrinkingHabit,
+		&i.SmokingHabit,
+		&i.MediaUrls,
+		&i.VerificationStatus,
+		&i.VerificationPic,
+		&i.Role,
+		&i.AudioPromptQuestion,
+		&i.AudioPromptAnswer,
+		&i.SpotlightActiveUntil,
+	)
+	return i, err
+}
+
 const updateUserMediaURLs = `-- name: UpdateUserMediaURLs :exec
 UPDATE users
 SET media_urls = $1
@@ -1063,38 +1087,34 @@ type UpdateUserMediaURLsParams struct {
 	ID        int32
 }
 
+// Sets the media URLs for a user, replacing any existing ones.
 func (q *Queries) UpdateUserMediaURLs(ctx context.Context, arg UpdateUserMediaURLsParams) error {
 	_, err := q.db.Exec(ctx, updateUserMediaURLs, arg.MediaUrls, arg.ID)
 	return err
 }
 
 const updateUserProfile = `-- name: UpdateUserProfile :one
+
 UPDATE users SET
-    name = $1,
-    last_name = $2,
-    date_of_birth = $3,
-    latitude = $4,
-    longitude = $5,
-    gender = $6,
-    dating_intention = $7,
-    height = $8,
-    hometown = $9,
-    job_title = $10,
-    education = $11,
-    religious_beliefs = $12,
-    drinking_habit = $13,
-    smoking_habit = $14
-WHERE id = $15
-RETURNING id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until
+    name = $1,                -- param $1
+    last_name = $2,           -- param $2
+    date_of_birth = $3,       -- param $3
+    dating_intention = $4,    -- param $4
+    height = $5,              -- param $5
+    hometown = $6,            -- param $6
+    job_title = $7,           -- param $7
+    education = $8,           -- param $8
+    religious_beliefs = $9,   -- param $9
+    drinking_habit = $10,     -- param $10
+    smoking_habit = $11       -- param $11
+WHERE id = $12                -- param $12
+RETURNING id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until
 `
 
 type UpdateUserProfileParams struct {
 	Name             pgtype.Text
 	LastName         pgtype.Text
 	DateOfBirth      pgtype.Date
-	Latitude         pgtype.Float8
-	Longitude        pgtype.Float8
-	Gender           NullGenderEnum
 	DatingIntention  NullDatingIntention
 	Height           pgtype.Float8
 	Hometown         pgtype.Text
@@ -1106,14 +1126,14 @@ type UpdateUserProfileParams struct {
 	ID               int32
 }
 
+// $1 should be 'pending'
+// Updates the main profile details, EXCLUDING location and gender.
+// Parameter indexes adjusted after removing location/gender params.
 func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error) {
 	row := q.db.QueryRow(ctx, updateUserProfile,
 		arg.Name,
 		arg.LastName,
 		arg.DateOfBirth,
-		arg.Latitude,
-		arg.Longitude,
-		arg.Gender,
 		arg.DatingIntention,
 		arg.Height,
 		arg.Hometown,
@@ -1130,7 +1150,7 @@ func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfilePa
 		&i.CreatedAt,
 		&i.Name,
 		&i.LastName,
-		&i.PhoneNumber,
+		&i.Email,
 		&i.DateOfBirth,
 		&i.Latitude,
 		&i.Longitude,
@@ -1158,7 +1178,7 @@ const updateUserRole = `-- name: UpdateUserRole :one
 UPDATE users
 SET role = $1
 WHERE id = $2
-RETURNING id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until
+RETURNING id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until
 `
 
 type UpdateUserRoleParams struct {
@@ -1166,6 +1186,7 @@ type UpdateUserRoleParams struct {
 	ID   int32
 }
 
+// Updates the user's role (e.g., to 'admin' or 'user').
 func (q *Queries) UpdateUserRole(ctx context.Context, arg UpdateUserRoleParams) (User, error) {
 	row := q.db.QueryRow(ctx, updateUserRole, arg.Role, arg.ID)
 	var i User
@@ -1174,7 +1195,7 @@ func (q *Queries) UpdateUserRole(ctx context.Context, arg UpdateUserRoleParams) 
 		&i.CreatedAt,
 		&i.Name,
 		&i.LastName,
-		&i.PhoneNumber,
+		&i.Email,
 		&i.DateOfBirth,
 		&i.Latitude,
 		&i.Longitude,
@@ -1204,7 +1225,7 @@ SET
     verification_pic = $1,
     verification_status = $2
 WHERE id = $3
-RETURNING id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until
+RETURNING id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until
 `
 
 type UpdateUserVerificationDetailsParams struct {
@@ -1213,6 +1234,7 @@ type UpdateUserVerificationDetailsParams struct {
 	ID                 int32
 }
 
+// Updates the verification picture URL and status together.
 func (q *Queries) UpdateUserVerificationDetails(ctx context.Context, arg UpdateUserVerificationDetailsParams) (User, error) {
 	row := q.db.QueryRow(ctx, updateUserVerificationDetails, arg.VerificationPic, arg.VerificationStatus, arg.ID)
 	var i User
@@ -1221,7 +1243,7 @@ func (q *Queries) UpdateUserVerificationDetails(ctx context.Context, arg UpdateU
 		&i.CreatedAt,
 		&i.Name,
 		&i.LastName,
-		&i.PhoneNumber,
+		&i.Email,
 		&i.DateOfBirth,
 		&i.Latitude,
 		&i.Longitude,
@@ -1249,7 +1271,7 @@ const updateUserVerificationStatus = `-- name: UpdateUserVerificationStatus :one
 UPDATE users
 SET verification_status = $1
 WHERE id = $2
-RETURNING id, created_at, name, last_name, phone_number, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until
+RETURNING id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until
 `
 
 type UpdateUserVerificationStatusParams struct {
@@ -1257,6 +1279,7 @@ type UpdateUserVerificationStatusParams struct {
 	ID                 int32
 }
 
+// Updates the verification status ('true', 'false', 'pending').
 func (q *Queries) UpdateUserVerificationStatus(ctx context.Context, arg UpdateUserVerificationStatusParams) (User, error) {
 	row := q.db.QueryRow(ctx, updateUserVerificationStatus, arg.VerificationStatus, arg.ID)
 	var i User
@@ -1265,7 +1288,7 @@ func (q *Queries) UpdateUserVerificationStatus(ctx context.Context, arg UpdateUs
 		&i.CreatedAt,
 		&i.Name,
 		&i.LastName,
-		&i.PhoneNumber,
+		&i.Email,
 		&i.DateOfBirth,
 		&i.Latitude,
 		&i.Longitude,

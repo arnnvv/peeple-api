@@ -1,3 +1,4 @@
+// FILE: pkg/handlers/audio.go
 package handlers
 
 import (
@@ -13,6 +14,7 @@ import (
 	"github.com/arnnvv/peeple-api/migrations"
 	"github.com/arnnvv/peeple-api/pkg/db"
 	"github.com/arnnvv/peeple-api/pkg/token"
+	"github.com/arnnvv/peeple-api/pkg/utils" // Import utils
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -108,13 +110,13 @@ func parseMigrationsAudioPrompt(promptStr string) (migrations.AudioPrompt, error
 func GenerateAudioPresignedURL(w http.ResponseWriter, r *http.Request) {
 	const operation = "handlers.GenerateAudioPresignedURL"
 	if r.Method != http.MethodPost {
-		respondWithError(w, http.StatusMethodNotAllowed, "Method Not Allowed: Use POST", operation)
+		respondWithError(w, http.StatusMethodNotAllowed, "Method Not Allowed: Use POST", operation) // Use local helper
 		return
 	}
 
 	claims, ok := r.Context().Value(token.ClaimsContextKey).(*token.Claims)
 	if !ok || claims == nil || claims.UserID <= 0 {
-		respondWithError(w, http.StatusUnauthorized, "Authentication required: Invalid or missing token claims", operation)
+		respondWithError(w, http.StatusUnauthorized, "Authentication required: Invalid or missing token claims", operation) // Use local helper
 		return
 	}
 	userID := claims.UserID
@@ -126,31 +128,31 @@ func GenerateAudioPresignedURL(w http.ResponseWriter, r *http.Request) {
 
 	if awsRegion == "" || awsAccessKey == "" || awsSecretKey == "" || s3Bucket == "" {
 		log.Printf("[%s] Critical configuration error: Missing one or more AWS environment variables (REGION, ACCESS_KEY_ID, SECRET_ACCESS_KEY, S3_BUCKET)", operation)
-		respondWithError(w, http.StatusInternalServerError, "Server configuration error prevents file uploads", operation)
+		respondWithError(w, http.StatusInternalServerError, "Server configuration error prevents file uploads", operation) // Use local helper
 		return
 	}
 
 	var requestBody AudioFileRequest
 	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
 		log.Printf("[%s] Failed to decode request body: %v", operation, err)
-		respondWithError(w, http.StatusBadRequest, "Invalid request body format", operation)
+		respondWithError(w, http.StatusBadRequest, "Invalid request body format", operation) // Use local helper
 		return
 	}
 	defer r.Body.Close()
 
 	if requestBody.Filename == "" || requestBody.Type == "" || requestBody.Prompt == "" {
-		respondWithError(w, http.StatusBadRequest, "Missing required fields in request: filename, type, or prompt", operation)
+		respondWithError(w, http.StatusBadRequest, "Missing required fields in request: filename, type, or prompt", operation) // Use local helper
 		return
 	}
 
 	audioPromptEnum, err := parseMigrationsAudioPrompt(requestBody.Prompt)
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, err.Error(), operation)
+		respondWithError(w, http.StatusBadRequest, err.Error(), operation) // Use local helper
 		return
 	}
 
 	if !isValidAudioType(requestBody.Type) {
-		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Unsupported audio file type: '%s'", requestBody.Type), operation)
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Unsupported audio file type: '%s'", requestBody.Type), operation) // Use local helper
 		return
 	}
 
@@ -160,7 +162,7 @@ func GenerateAudioPresignedURL(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		log.Printf("[%s] Failed to initialize AWS session: %v", operation, err)
-		respondWithError(w, http.StatusInternalServerError, "Failed to connect to storage service", operation)
+		respondWithError(w, http.StatusInternalServerError, "Failed to connect to storage service", operation) // Use local helper
 		return
 	}
 
@@ -171,7 +173,7 @@ func GenerateAudioPresignedURL(w http.ResponseWriter, r *http.Request) {
 	presignedPutURL, permanentObjectURL, err := createPresignedURL(s3Client, s3Bucket, s3Key, requestBody.Type)
 	if err != nil {
 		log.Printf("[%s] Failed to generate presigned URL for key '%s': %v", operation, s3Key, err)
-		respondWithError(w, http.StatusInternalServerError, "Failed to prepare file upload URL", operation)
+		respondWithError(w, http.StatusInternalServerError, "Failed to prepare file upload URL", operation) // Use local helper
 		return
 	}
 
@@ -180,13 +182,12 @@ func GenerateAudioPresignedURL(w http.ResponseWriter, r *http.Request) {
 	err = handleDatabaseOperations(r.Context(), queries, int32(userID), permanentObjectURL, audioPromptEnum)
 	if err != nil {
 		log.Printf("[%s] Failed to update database for user %d with audio URL '%s': %v", operation, userID, permanentObjectURL, err)
-		respondWithError(w, http.StatusInternalServerError, "Failed to save audio information", operation)
+		respondWithError(w, http.StatusInternalServerError, "Failed to save audio information", operation) // Use local helper
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(AudioUploadURL{
+	// Use utils.RespondWithJSON for success case too
+	utils.RespondWithJSON(w, http.StatusOK, AudioUploadURL{
 		Filename: requestBody.Filename,
 		Type:     requestBody.Type,
 		URL:      presignedPutURL,
@@ -210,8 +211,7 @@ func createPresignedURL(s3Client *s3.S3, bucket, key, fileType string) (string, 
 	req, _ := s3Client.PutObjectRequest(&s3.PutObjectInput{
 		Bucket:      aws.String(bucket),
 		Key:         aws.String(key),
-		ContentType: aws.String(fileType), // Content-Type for the uploaded object.
-		// ACL: aws.String("private"), // Default ACL is private. Set "public-read" if needed.
+		ContentType: aws.String(fileType),
 	})
 
 	presignDuration := 15 * time.Minute
@@ -228,7 +228,6 @@ func createPresignedURL(s3Client *s3.S3, bucket, key, fileType string) (string, 
 
 	return presignedURL, permanentURL, nil
 }
-
 func handleDatabaseOperations(ctx context.Context, queries *migrations.Queries, userID int32, audioURL string, prompt migrations.AudioPrompt) error {
 	params := migrations.UpdateAudioPromptParams{
 		AudioPromptQuestion: migrations.NullAudioPrompt{
@@ -250,13 +249,14 @@ func handleDatabaseOperations(ctx context.Context, queries *migrations.Queries, 
 	return nil
 }
 
+// Local helper matching the signature used within this file
 func respondWithError(w http.ResponseWriter, code int, message string, operation string) {
 	log.Printf("[%s] Error %d: %s", operation, code, message)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
-	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(ErrorResponse{
+	// Use the shared ErrorResponse structure from utils
+	utils.RespondWithJSON(w, code, utils.ErrorResponse{
 		Success: false,
 		Message: message,
 	})

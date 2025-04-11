@@ -1,3 +1,4 @@
+// FILE: pkg/handlers/adminHandler.go
 package handlers
 
 import (
@@ -9,16 +10,16 @@ import (
 
 	"github.com/arnnvv/peeple-api/migrations"
 	"github.com/arnnvv/peeple-api/pkg/db"
+	"github.com/arnnvv/peeple-api/pkg/utils" // Import utils
+	"github.com/jackc/pgx/v5"                // Import pgx
 )
 
-type ErrorResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-}
+// ErrorResponse struct removed (now using utils.ErrorResponse)
 
+// Changed request to use Email
 type SetAdminRequest struct {
-	PhoneNumber string `json:"phone_number"`
-	IsAdmin     bool   `json:"is_admin"`
+	Email   string `json:"email"`
+	IsAdmin bool   `json:"is_admin"`
 }
 
 type SetAdminResponse struct {
@@ -32,8 +33,7 @@ func SetAdminHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(ErrorResponse{Success: false, Message: "Method Not Allowed: Use POST"})
+		utils.RespondWithError(w, http.StatusMethodNotAllowed, "Method Not Allowed: Use POST") // Use utils.RespondWithError
 		return
 	}
 
@@ -41,31 +41,28 @@ func SetAdminHandler(w http.ResponseWriter, r *http.Request) {
 	var req SetAdminRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		log.Printf("SetAdminHandler: Error decoding request body: %v", err)
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ErrorResponse{Success: false, Message: "Invalid request body format"})
+		utils.RespondWithError(w, http.StatusBadRequest, "Invalid request body format") // Use utils.RespondWithError
 		return
 	}
-	defer r.Body.Close() // closinbg the body
+	defer r.Body.Close()
 
-	if req.PhoneNumber == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ErrorResponse{Success: false, Message: "Phone number is required"})
+	// Changed validation from phone number to email
+	if req.Email == "" {
+		utils.RespondWithError(w, http.StatusBadRequest, "Email address is required") // Use utils.RespondWithError
 		return
 	}
+	// Basic email format check can be added here if desired
 
 	queries := db.GetDB()
-	user, err := queries.GetUserByPhone(r.Context(), req.PhoneNumber)
+	// Changed lookup from GetUserByPhone to GetUserByEmail
+	user, err := queries.GetUserByEmail(r.Context(), req.Email)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(ErrorResponse{
-				Success: false,
-				Message: "User with the provided phone number not found",
-			})
+		// Adjusted error checking for pgx/v5
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
+			utils.RespondWithError(w, http.StatusNotFound, "User with the provided email not found") // Use utils.RespondWithError
 		} else {
-			log.Printf("SetAdminHandler: Error fetching user by phone %s: %v\n", req.PhoneNumber, err)
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(ErrorResponse{Success: false, Message: "Database error retrieving user"})
+			log.Printf("SetAdminHandler: Error fetching user by email %s: %v\n", req.Email, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, "Database error retrieving user") // Use utils.RespondWithError
 		}
 		return
 	}
@@ -79,9 +76,7 @@ func SetAdminHandler(w http.ResponseWriter, r *http.Request) {
 
 	// 3. Update the user's role
 	if user.Role == targetRole {
-		// Role is already set, maybe return success or a specific message
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(SetAdminResponse{
+		utils.RespondWithJSON(w, http.StatusOK, SetAdminResponse{ // Use utils.RespondWithJSON
 			Success: true,
 			Message: "User role is already set to the desired value",
 			UserID:  user.ID,
@@ -97,14 +92,12 @@ func SetAdminHandler(w http.ResponseWriter, r *http.Request) {
 
 	updatedUser, err := queries.UpdateUserRole(r.Context(), updateParams)
 	if err != nil {
-		log.Printf("SetAdminHandler: Error updating role for user %d: %v\n", user.ID, err)
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(ErrorResponse{Success: false, Message: "Failed to update user role in database"})
+		log.Printf("SetAdminHandler: Error updating role for user %d (%s): %v\n", user.ID, req.Email, err)
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to update user role in database") // Use utils.RespondWithError
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(SetAdminResponse{
+	utils.RespondWithJSON(w, http.StatusOK, SetAdminResponse{ // Use utils.RespondWithJSON
 		Success: true,
 		Message: "User role updated successfully",
 		UserID:  updatedUser.ID,

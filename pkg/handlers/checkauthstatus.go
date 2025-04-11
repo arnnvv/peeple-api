@@ -1,3 +1,4 @@
+// FILE: pkg/handlers/checkauthstatus.go
 package handlers
 
 import (
@@ -16,7 +17,7 @@ import (
 
 type AuthStatusResponse struct {
 	Success bool   `json:"success"`
-	Status  string `json:"status"`
+	Status  string `json:"status"` // "login", "onboarding1", "onboarding2", "home"
 	Message string `json:"message,omitempty"`
 }
 
@@ -34,48 +35,55 @@ func CheckAuthStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := int32(claims.UserID)
-
-	var user migrations.User
-	var err error
-
 	queries := db.GetDB()
-	user, err = queries.GetUserByID(r.Context(), userID)
+	user, err := queries.GetUserByID(r.Context(), userID)
+
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
-			log.Printf("[%s] User not found for ID: %d", "handlers.CheckAuthStatus", userID)
-			respondAuthStatus(w, http.StatusUnauthorized, AuthStatusResponse{
-				Success: false,
-				Status:  "login",
-				Message: "User account not found",
-			})
-		} else {
-			log.Printf("[%s] Database error fetching user ID %d: %v", "handlers.CheckAuthStatus", userID, err)
-			respondAuthStatus(w, http.StatusInternalServerError, AuthStatusResponse{
-				Success: false,
-				Status:  "login", // generic error status will be btr
-				Message: "Error checking user status",
-			})
+		log.Printf("[%s] Error fetching user ID %d: %v", "handlers.CheckAuthStatus", userID, err)
+		status := http.StatusInternalServerError
+		resp := AuthStatusResponse{
+			Success: false,
+			Status:  "login", // Default to login on error
+			Message: "Error checking user status",
 		}
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
+			status = http.StatusUnauthorized // Treat non-existent user same as invalid token
+			resp.Message = "User account not found"
+		}
+		respondAuthStatus(w, status, resp) // Use helper
 		return
 	}
 
-	if !user.Name.Valid || user.Name.String == "" {
+	// Check onboarding steps
+	// Step 1: Check if Gender is set
+	if !user.Gender.Valid || (user.Gender.GenderEnum != migrations.GenderEnumMan && user.Gender.GenderEnum != migrations.GenderEnumWoman) {
 		respondAuthStatus(w, http.StatusOK, AuthStatusResponse{
 			Success: true,
-			Status:  "onboarding",
-			Message: "User profile requires completion",
+			Status:  "onboarding1", // Gender/Location step
+			Message: "User requires gender and location setup",
 		})
 		return
 	}
 
+	// Step 2: Check if Name is set (assuming Gender is already set)
+	if !user.Name.Valid || user.Name.String == "" {
+		respondAuthStatus(w, http.StatusOK, AuthStatusResponse{
+			Success: true,
+			Status:  "onboarding2", // Main profile details step
+			Message: "User requires profile details completion",
+		})
+		return
+	}
+
+	// If both Gender and Name are set, user is considered fully onboarded
 	respondAuthStatus(w, http.StatusOK, AuthStatusResponse{
 		Success: true,
 		Status:  "home",
 		Message: "User authenticated",
 	})
-
 }
 
+// Keep the helper function
 func respondAuthStatus(w http.ResponseWriter, code int, payload AuthStatusResponse) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)

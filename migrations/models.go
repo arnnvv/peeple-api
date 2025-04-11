@@ -268,15 +268,12 @@ func (ns NullDrinkingSmokingHabits) Value() (driver.Value, error) {
 	return string(ns.DrinkingSmokingHabits), nil
 }
 
-// Enumerated type for representing gender identity and/or sexual orientation as specified.
+// Enumerated type for representing gender identity.
 type GenderEnum string
 
 const (
-	GenderEnumMan      GenderEnum = "man"
-	GenderEnumWoman    GenderEnum = "woman"
-	GenderEnumGay      GenderEnum = "gay"
-	GenderEnumLesbian  GenderEnum = "lesbian"
-	GenderEnumBisexual GenderEnum = "bisexual"
+	GenderEnumMan   GenderEnum = "man"
+	GenderEnumWoman GenderEnum = "woman"
 )
 
 func (e *GenderEnum) Scan(src interface{}) error {
@@ -755,13 +752,6 @@ type MyTypePrompt struct {
 	Answer   string
 }
 
-type Otp struct {
-	ID        int32
-	UserID    int32
-	OtpCode   string
-	ExpiresAt pgtype.Timestamptz
-}
-
 type StoryTimePrompt struct {
 	ID       int32
 	UserID   int32
@@ -774,7 +764,7 @@ type User struct {
 	CreatedAt           pgtype.Timestamptz
 	Name                pgtype.Text
 	LastName            pgtype.Text
-	PhoneNumber         string
+	Email               string
 	DateOfBirth         pgtype.Date
 	Latitude            pgtype.Float8
 	Longitude           pgtype.Float8
