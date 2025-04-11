@@ -130,6 +130,37 @@ func (q *Queries) CountRecentStandardLikes(ctx context.Context, likerUserID int3
 	return count, err
 }
 
+const createChatMessage = `-- name: CreateChatMessage :one
+INSERT INTO chat_messages (
+    sender_user_id,
+    recipient_user_id,
+    message_text
+) VALUES (
+    $1, $2, $3
+) RETURNING id, sender_user_id, recipient_user_id, message_text, sent_at, is_read
+`
+
+type CreateChatMessageParams struct {
+	SenderUserID    int32
+	RecipientUserID int32
+	MessageText     string
+}
+
+// Chat Queries (from partner branch) --
+func (q *Queries) CreateChatMessage(ctx context.Context, arg CreateChatMessageParams) (ChatMessage, error) {
+	row := q.db.QueryRow(ctx, createChatMessage, arg.SenderUserID, arg.RecipientUserID, arg.MessageText)
+	var i ChatMessage
+	err := row.Scan(
+		&i.ID,
+		&i.SenderUserID,
+		&i.RecipientUserID,
+		&i.MessageText,
+		&i.SentAt,
+		&i.IsRead,
+	)
+	return i, err
+}
+
 const createDateVibesPrompt = `-- name: CreateDateVibesPrompt :one
 INSERT INTO date_vibes_prompts (user_id, question, answer)
 VALUES ($1, $2, $3)
@@ -358,6 +389,55 @@ func (q *Queries) GetActiveSubscription(ctx context.Context, arg GetActiveSubscr
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const getConversationMessages = `-- name: GetConversationMessages :many
+SELECT id, sender_user_id, recipient_user_id, message_text, sent_at, is_read FROM chat_messages
+WHERE (sender_user_id = $1 AND recipient_user_id = $2)
+   OR (sender_user_id = $2 AND recipient_user_id = $1)
+ORDER BY sent_at ASC
+LIMIT $3 OFFSET $4
+`
+
+type GetConversationMessagesParams struct {
+	SenderUserID    int32
+	RecipientUserID int32
+	Limit           int32
+	Offset          int32
+}
+
+// Retrieves messages between two specific users, ordered by time.
+// Useful for loading chat history.
+func (q *Queries) GetConversationMessages(ctx context.Context, arg GetConversationMessagesParams) ([]ChatMessage, error) {
+	rows, err := q.db.Query(ctx, getConversationMessages,
+		arg.SenderUserID,
+		arg.RecipientUserID,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ChatMessage
+	for rows.Next() {
+		var i ChatMessage
+		if err := rows.Scan(
+			&i.ID,
+			&i.SenderUserID,
+			&i.RecipientUserID,
+			&i.MessageText,
+			&i.SentAt,
+			&i.IsRead,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getHomeFeed = `-- name: GetHomeFeed :many
@@ -793,7 +873,7 @@ SELECT id, created_at, name, last_name, email, date_of_birth, latitude, longitud
 WHERE id = $1 LIMIT 1
 `
 
-// FILE: db/queries.sql
+// FILE: db/queries.sql (Resolved)
 func (q *Queries) GetUserByID(ctx context.Context, id int32) (User, error) {
 	row := q.db.QueryRow(ctx, getUserByID, id)
 	var i User
@@ -993,6 +1073,22 @@ VALUES ($1)
 
 func (q *Queries) LogAppOpen(ctx context.Context, userID int32) error {
 	_, err := q.db.Exec(ctx, logAppOpen, userID)
+	return err
+}
+
+const markMessagesAsRead = `-- name: MarkMessagesAsRead :exec
+UPDATE chat_messages
+SET is_read = true
+WHERE recipient_user_id = $1 AND sender_user_id = $2 AND is_read = false
+`
+
+type MarkMessagesAsReadParams struct {
+	RecipientUserID int32
+	SenderUserID    int32
+}
+
+func (q *Queries) MarkMessagesAsRead(ctx context.Context, arg MarkMessagesAsReadParams) error {
+	_, err := q.db.Exec(ctx, markMessagesAsRead, arg.RecipientUserID, arg.SenderUserID)
 	return err
 }
 

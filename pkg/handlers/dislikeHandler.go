@@ -63,7 +63,6 @@ func DislikeHandler(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		log.Printf("Error adding dislike for user %d -> %d: %v", dislikerUserID, req.DislikedUserID, err)
-		// Handle potential DB errors if needed, e.g., constraint violations although ON CONFLICT handles duplicates
 		utils.RespondWithJSON(w, http.StatusInternalServerError, DislikeResponse{Success: false, Message: "Failed to process dislike"})
 		return
 	}

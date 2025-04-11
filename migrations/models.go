@@ -692,6 +692,21 @@ type AppOpenLog struct {
 	OpenedAt pgtype.Timestamptz
 }
 
+// Stores individual chat messages between users.
+type ChatMessage struct {
+	ID int64
+	// The ID of the user who sent the message.
+	SenderUserID int32
+	// The ID of the user who should receive the message.
+	RecipientUserID int32
+	// The content of the chat message.
+	MessageText string
+	// Timestamp when the message was sent.
+	SentAt pgtype.Timestamptz
+	// Flag indicating if the recipient has marked the message as read.
+	IsRead bool
+}
+
 type DateVibesPrompt struct {
 	ID       int32
 	UserID   int32

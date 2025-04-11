@@ -1,4 +1,4 @@
--- FILE: db/queries.sql
+-- FILE: db/queries.sql (Resolved)
 
 -- name: GetUserByID :one
 SELECT * FROM users
@@ -315,14 +315,29 @@ WHERE liker_user_id = $1 -- The user who sent the like
 AND liked_user_id = $2   -- The user who received the like (current user)
 LIMIT 1;
 
--- REMOVED OTP QUERIES
--- Removed: CleanOTP
--- Removed: DeleteOTPsByPhoneNumber
--- Removed: GetUserByPhone
--- Removed: AddPhoneNumberInUsers
--- Removed: CreateUserMinimal
--- Removed: GetOTPByUser
--- Removed: CreateOTP
--- Removed: DeleteOTPByID
--- Removed: DeleteOTPByUser
--- Removed: CleanOTPs
+
+-- Chat Queries (from partner branch) --
+-- name: CreateChatMessage :one
+INSERT INTO chat_messages (
+    sender_user_id,
+    recipient_user_id,
+    message_text
+) VALUES (
+    $1, $2, $3
+) RETURNING *;
+
+-- name: GetConversationMessages :many
+-- Retrieves messages between two specific users, ordered by time.
+-- Useful for loading chat history.
+SELECT * FROM chat_messages
+WHERE (sender_user_id = $1 AND recipient_user_id = $2)
+   OR (sender_user_id = $2 AND recipient_user_id = $1)
+ORDER BY sent_at ASC
+LIMIT $3 OFFSET $4;
+
+-- name: MarkMessagesAsRead :exec
+UPDATE chat_messages
+SET is_read = true
+WHERE recipient_user_id = $1 AND sender_user_id = $2 AND is_read = false;
+
+-- REMOVED CheckLikeExists query as it's not used and validation moved to Go code.
