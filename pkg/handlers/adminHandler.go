@@ -1,3 +1,4 @@
+// FILE: pkg/handlers/adminHandler.go (Resolved)
 package handlers
 
 import (
@@ -9,16 +10,14 @@ import (
 
 	"github.com/arnnvv/peeple-api/migrations"
 	"github.com/arnnvv/peeple-api/pkg/db"
+	"github.com/arnnvv/peeple-api/pkg/utils" // Import utils
+	"github.com/jackc/pgx/v5"                // Import pgx
 )
 
-type ErrorResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-}
-
+// Changed request to use Email
 type SetAdminRequest struct {
-	PhoneNumber string `json:"phone_number"`
-	IsAdmin     bool   `json:"is_admin"`
+	Email   string `json:"email"`
+	IsAdmin bool   `json:"is_admin"`
 }
 
 type SetAdminResponse struct {
@@ -32,39 +31,31 @@ func SetAdminHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(ErrorResponse{Success: false, Message: "Method Not Allowed: Use POST"})
+		utils.RespondWithError(w, http.StatusMethodNotAllowed, "Method Not Allowed: Use POST")
 		return
 	}
 
 	var req SetAdminRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		log.Printf("SetAdminHandler: Error decoding request body: %v", err)
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ErrorResponse{Success: false, Message: "Invalid request body format"})
+		utils.RespondWithError(w, http.StatusBadRequest, "Invalid request body format")
 		return
 	}
 	defer r.Body.Close()
 
-	if req.PhoneNumber == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ErrorResponse{Success: false, Message: "Phone number is required"})
+	if req.Email == "" {
+		utils.RespondWithError(w, http.StatusBadRequest, "Email address is required")
 		return
 	}
 
 	queries := db.GetDB()
-	user, err := queries.GetUserByPhone(r.Context(), req.PhoneNumber)
+	user, err := queries.GetUserByEmail(r.Context(), req.Email)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(ErrorResponse{
-				Success: false,
-				Message: "User with the provided phone number not found",
-			})
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
+			utils.RespondWithError(w, http.StatusNotFound, "User with the provided email not found")
 		} else {
-			log.Printf("SetAdminHandler: Error fetching user by phone %s: %v\n", req.PhoneNumber, err)
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(ErrorResponse{Success: false, Message: "Database error retrieving user"})
+			log.Printf("SetAdminHandler: Error fetching user by email %s: %v\n", req.Email, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, "Database error retrieving user")
 		}
 		return
 	}
@@ -77,8 +68,7 @@ func SetAdminHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if user.Role == targetRole {
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(SetAdminResponse{
+		utils.RespondWithJSON(w, http.StatusOK, SetAdminResponse{ // Kept utils call
 			Success: true,
 			Message: "User role is already set to the desired value",
 			UserID:  user.ID,
@@ -94,14 +84,12 @@ func SetAdminHandler(w http.ResponseWriter, r *http.Request) {
 
 	updatedUser, err := queries.UpdateUserRole(r.Context(), updateParams)
 	if err != nil {
-		log.Printf("SetAdminHandler: Error updating role for user %d: %v\n", user.ID, err)
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(ErrorResponse{Success: false, Message: "Failed to update user role in database"})
+		log.Printf("SetAdminHandler: Error updating role for user %d (%s): %v\n", user.ID, req.Email, err)
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to update user role in database")
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(SetAdminResponse{
+	utils.RespondWithJSON(w, http.StatusOK, SetAdminResponse{ // Kept utils call
 		Success: true,
 		Message: "User role updated successfully",
 		UserID:  updatedUser.ID,

@@ -1,113 +1,88 @@
--- name: CleanOTP :exec
-DELETE FROM otps
-WHERE expires_at < NOW();
-
--- name: DeleteOTPsByPhoneNumber :exec
-DELETE FROM otps
-WHERE user_id = (SELECT id FROM users WHERE phone_number = $1);
+-- FILE: db/queries.sql (Resolved)
 
 -- name: GetUserByID :one
 SELECT * FROM users
 WHERE id = $1 LIMIT 1;
 
--- name: GetUserByPhone :one
+-- name: GetUserByEmail :one
 SELECT * FROM users
-WHERE phone_number = $1 LIMIT 1;
+WHERE email = $1 LIMIT 1;
 
--- name: GetPendingVerificationUsers :many
-SELECT * FROM users
-WHERE verification_status = $1; -- $1 should be 'pending'
-
--- name: AddPhoneNumberInUsers :one
+-- name: CreateUserWithEmail :one
+-- Creates a new user with only their email address initially.
 INSERT INTO users (
-    phone_number
+    email
 ) VALUES (
     $1
 )
 RETURNING *;
 
--- name: CreateUserMinimal :one
-INSERT INTO users (
-    phone_number, gender
-) VALUES (
-    $1, $2
-)
-RETURNING *;
+-- name: GetPendingVerificationUsers :many
+-- Fetches users whose verification status is 'pending'.
+SELECT * FROM users
+WHERE verification_status = $1; -- $1 should be 'pending'
 
 -- name: UpdateUserProfile :one
+-- Updates the main profile details, EXCLUDING location and gender.
+-- Parameter indexes adjusted after removing location/gender params.
 UPDATE users SET
-    name = $1,
-    last_name = $2,
-    date_of_birth = $3,
-    latitude = $4,
-    longitude = $5,
-    gender = $6,
-    dating_intention = $7,
-    height = $8,
-    hometown = $9,
-    job_title = $10,
-    education = $11,
-    religious_beliefs = $12,
-    drinking_habit = $13,
-    smoking_habit = $14
-WHERE id = $15
+    name = $1,                -- param $1
+    last_name = $2,           -- param $2
+    date_of_birth = $3,       -- param $3
+    dating_intention = $4,    -- param $4
+    height = $5,              -- param $5
+    hometown = $6,            -- param $6
+    job_title = $7,           -- param $7
+    education = $8,           -- param $8
+    religious_beliefs = $9,   -- param $9
+    drinking_habit = $10,     -- param $10
+    smoking_habit = $11       -- param $11
+WHERE id = $12                -- param $12
+RETURNING *;
+
+-- name: UpdateUserLocationGender :one
+-- Updates only the user's latitude, longitude, and gender.
+UPDATE users SET
+    latitude = $1,
+    longitude = $2,
+    gender = $3
+WHERE id = $4
 RETURNING *;
 
 -- name: UpdateUserRole :one
+-- Updates the user's role (e.g., to 'admin' or 'user').
 UPDATE users
 SET role = $1
 WHERE id = $2
 RETURNING *;
 
 -- name: ClearUserMediaURLs :exec
+-- Removes all media URLs for a user.
 UPDATE users
 SET media_urls = '{}'
 WHERE id = $1;
 
 -- name: UpdateUserMediaURLs :exec
+-- Sets the media URLs for a user, replacing any existing ones.
 UPDATE users
 SET media_urls = $1
 WHERE id = $2;
 
 -- name: UpdateUserVerificationStatus :one
+-- Updates the verification status ('true', 'false', 'pending').
 UPDATE users
 SET verification_status = $1
 WHERE id = $2
 RETURNING *;
 
 -- name: UpdateUserVerificationDetails :one
+-- Updates the verification picture URL and status together.
 UPDATE users
 SET
     verification_pic = $1,
     verification_status = $2
 WHERE id = $3
 RETURNING *;
-
--- name: GetOTPByUser :one
-SELECT * FROM otps
-WHERE user_id = $1
-ORDER BY id DESC
-LIMIT 1;
-
--- name: CreateOTP :one
-INSERT INTO otps (
-    user_id, otp_code
-) VALUES (
-    $1, $2
-)
-RETURNING *;
-
--- name: DeleteOTPByID :exec
-DELETE FROM otps
-WHERE id = $1;
-
--- name: DeleteOTPByUser :exec
-DELETE FROM otps
-WHERE user_id = $1;
-
--- name: CleanOTPs :exec
-DELETE FROM otps
-WHERE expires_at < NOW();
 
 -- name: DeleteUserStoryTimePrompts :exec
 DELETE FROM story_time_prompts WHERE user_id = $1;
@@ -228,6 +203,7 @@ WHERE liker_user_id = $1
   AND created_at >= NOW() - INTERVAL '24 hours';
 
 -- name: GetHomeFeed :many
+-- Retrieves the main feed based on user filters and location.
 WITH RequestingUser AS (
     SELECT
         u.id, u.latitude, u.longitude, u.gender, u.date_of_birth, u.spotlight_active_until
@@ -245,10 +221,14 @@ JOIN RequestingUser ru ON target_user.id != ru.id
 JOIN RequestingUserFilters rf ON ru.id = rf.user_id
 LEFT JOIN filters AS target_user_filters ON target_user.id = target_user_filters.user_id
 WHERE
-    target_user.latitude IS NOT NULL AND target_user.longitude IS NOT NULL
+    target_user.latitude IS NOT NULL AND target_user.longitude IS NOT NULL -- Ensure target has location
+    AND ru.latitude IS NOT NULL AND ru.longitude IS NOT NULL             -- Ensure requesting user has location
+    AND ru.gender IS NOT NULL                                             -- Ensure requesting user has gender set
+    AND rf.who_you_want_to_see IS NOT NULL                                -- Ensure filter preference is set
+    AND rf.age_min IS NOT NULL AND rf.age_max IS NOT NULL                 -- Ensure age filters are set
     AND (rf.radius_km IS NULL OR haversine(ru.latitude, ru.longitude, target_user.latitude, target_user.longitude) <= rf.radius_km)
-    AND target_user.gender = rf.who_you_want_to_see
-    AND (target_user_filters.user_id IS NULL OR target_user_filters.who_you_want_to_see IS NULL OR target_user_filters.who_you_want_to_see = ru.gender)
+    AND target_user.gender = rf.who_you_want_to_see -- Target gender matches filter
+    AND (target_user_filters.user_id IS NULL OR target_user_filters.who_you_want_to_see IS NULL OR target_user_filters.who_you_want_to_see = ru.gender) -- Target preferences allow requesting user's gender
     AND target_user.date_of_birth IS NOT NULL
     AND EXTRACT(YEAR FROM AGE(target_user.date_of_birth)) BETWEEN rf.age_min AND rf.age_max
     AND (NOT rf.active_today OR EXISTS (
@@ -259,10 +239,33 @@ WHERE
     AND NOT EXISTS (SELECT 1 FROM dislikes d WHERE d.disliker_user_id = target_user.id AND d.disliked_user_id = ru.id)
     AND NOT EXISTS (SELECT 1 FROM likes l WHERE l.liker_user_id = ru.id AND l.liked_user_id = target_user.id)
 ORDER BY
-    CASE WHEN target_user.spotlight_active_until > NOW() THEN 0 ELSE 1 END ASC,
+    CASE WHEN target_user.spotlight_active_until > NOW() THEN 0 ELSE 1 END ASC, -- Spotlight users first
     distance_km ASC,
-    ABS(EXTRACT(YEAR FROM AGE(ru.date_of_birth)) - EXTRACT(YEAR FROM AGE(target_user.date_of_birth))) ASC NULLS LAST
-LIMIT $2;
+    -- Use age difference calculation only if requesting user DOB is set
+    CASE WHEN ru.date_of_birth IS NOT NULL THEN
+      ABS(EXTRACT(YEAR FROM AGE(ru.date_of_birth)) - EXTRACT(YEAR FROM AGE(target_user.date_of_birth)))
+    ELSE
+      NULL -- Or some other default ordering if DOB is missing
+    END ASC NULLS LAST
+LIMIT $2; -- Param $2 is the feed batch size (e.g., 15)
+
+-- name: GetQuickFeed :many
+-- Retrieves a small feed based purely on proximity and opposite gender.
+-- Parameters: $1=latitude, $2=longitude (of requesting user), $3=requesting_user_id, $4=gender_to_show, $5=limit
+SELECT
+    target_user.*,
+    haversine($1, $2, target_user.latitude, target_user.longitude) AS distance_km
+FROM users AS target_user
+WHERE
+      target_user.id != $3 -- Exclude self
+  AND target_user.latitude IS NOT NULL
+  AND target_user.longitude IS NOT NULL
+  AND target_user.gender = $4 -- Filter by the OPPOSITE gender passed as param
+  AND target_user.name IS NOT NULL AND target_user.name != '' -- Basic profile check
+  AND target_user.date_of_birth IS NOT NULL                  -- Basic profile check
+ORDER BY
+    distance_km ASC
+LIMIT $5;
 
 -- name: AddUserSubscription :one
 INSERT INTO user_subscriptions (
@@ -273,8 +276,6 @@ INSERT INTO user_subscriptions (
 RETURNING *;
 
 -- name: AddContentLike :one
--- Inserts a like for a specific content item, potentially with a comment.
--- content_identifier is TEXT type in the DB.
 INSERT INTO likes (
     liker_user_id,
     liked_user_id,
@@ -285,19 +286,37 @@ INSERT INTO likes (
 ) VALUES (
     $1, $2, $3, $4, $5, $6
 )
--- Prevent duplicate likes on the exact same item
 ON CONFLICT (liker_user_id, liked_user_id, content_type, content_identifier)
 DO NOTHING
 RETURNING *;
 
--- Removed Check...Exists queries as validation moves to Go code
+-- name: GetLikersForUser :many
+SELECT
+    l.liker_user_id,
+    l.comment,
+    l.interaction_type,
+    l.created_at as liked_at,
+    u.name,
+    u.last_name,
+    u.media_urls
+FROM likes l
+JOIN users u ON l.liker_user_id = u.id
+WHERE l.liked_user_id = $1 -- The user receiving the likes (current user)
+ORDER BY
+    (l.interaction_type = 'rose') DESC, -- Roses first
+    l.created_at DESC;                  -- Then by time
 
--- name: CheckLikeExists :one
-SELECT EXISTS (
-    SELECT 1 FROM likes
-    WHERE liker_user_id = $1 AND liked_user_id = $2
-);
+-- name: GetLikeDetails :one
+SELECT
+    comment,
+    interaction_type
+FROM likes
+WHERE liker_user_id = $1 -- The user who sent the like
+AND liked_user_id = $2   -- The user who received the like (current user)
+LIMIT 1;
 
+
+-- Chat Queries (from partner branch) --
 -- name: CreateChatMessage :one
 INSERT INTO chat_messages (
     sender_user_id,
@@ -320,3 +339,5 @@ LIMIT $3 OFFSET $4;
 UPDATE chat_messages
 SET is_read = true
 WHERE recipient_user_id = $1 AND sender_user_id = $2 AND is_read = false;
+
+-- REMOVED CheckLikeExists query as it's not used and validation moved to Go code.
