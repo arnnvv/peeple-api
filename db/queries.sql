@@ -297,3 +297,26 @@ SELECT EXISTS (
     SELECT 1 FROM likes
     WHERE liker_user_id = $1 AND liked_user_id = $2
 );
+
+-- name: CreateChatMessage :one
+INSERT INTO chat_messages (
+    sender_user_id,
+    recipient_user_id,
+    message_text
+) VALUES (
+    $1, $2, $3
+) RETURNING *;
+
+-- name: GetConversationMessages :many
+-- Retrieves messages between two specific users, ordered by time.
+-- Useful for loading chat history.
+SELECT * FROM chat_messages
+WHERE (sender_user_id = $1 AND recipient_user_id = $2)
+   OR (sender_user_id = $2 AND recipient_user_id = $1)
+ORDER BY sent_at ASC
+LIMIT $3 OFFSET $4;
+
+-- name: MarkMessagesAsRead :exec
+UPDATE chat_messages
+SET is_read = true
+WHERE recipient_user_id = $1 AND sender_user_id = $2 AND is_read = false;
