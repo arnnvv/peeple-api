@@ -104,6 +104,23 @@ func (q *Queries) AddUserSubscription(ctx context.Context, arg AddUserSubscripti
 	return i, err
 }
 
+const checkMutualLikeExists = `-- name: CheckMutualLikeExists :one
+SELECT EXISTS (SELECT 1 FROM likes l1 WHERE l1.liker_user_id = $1 AND l1.liked_user_id = $2)
+   AND EXISTS (SELECT 1 FROM likes l2 WHERE l2.liker_user_id = $2 AND l2.liked_user_id = $1)
+`
+
+type CheckMutualLikeExistsParams struct {
+	LikerUserID int32
+	LikedUserID int32
+}
+
+func (q *Queries) CheckMutualLikeExists(ctx context.Context, arg CheckMutualLikeExistsParams) (pgtype.Bool, error) {
+	row := q.db.QueryRow(ctx, checkMutualLikeExists, arg.LikerUserID, arg.LikedUserID)
+	var column_1 pgtype.Bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const clearUserMediaURLs = `-- name: ClearUserMediaURLs :exec
 UPDATE users
 SET media_urls = '{}'

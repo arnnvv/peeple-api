@@ -340,4 +340,6 @@ UPDATE chat_messages
 SET is_read = true
 WHERE recipient_user_id = $1 AND sender_user_id = $2 AND is_read = false;
 
--- REMOVED CheckLikeExists query as it's not used and validation moved to Go code.
+-- name: CheckMutualLikeExists :one
+SELECT EXISTS (SELECT 1 FROM likes l1 WHERE l1.liker_user_id = $1 AND l1.liked_user_id = $2)
+   AND EXISTS (SELECT 1 FROM likes l2 WHERE l2.liker_user_id = $2 AND l2.liked_user_id = $1);

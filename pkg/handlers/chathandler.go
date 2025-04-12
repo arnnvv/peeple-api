@@ -21,7 +21,6 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-// Client now stores userID instead of a username string
 type Client struct {
 	conn   *websocket.Conn
 	userID int32
@@ -69,7 +68,7 @@ func ChatHandler(w http.ResponseWriter, r *http.Request) {
 	clientsMu.Lock()
 	if oldClient, exists := clients[userID]; exists {
 		log.Printf("WARN: ChatHandler: Closing existing connection for user %d.", userID)
-		oldClient.conn.Close() // Attempt to close gracefully
+		oldClient.conn.Close()
 	}
 	clients[userID] = client
 	clientsMu.Unlock()
@@ -106,12 +105,30 @@ func ChatHandler(w http.ResponseWriter, r *http.Request) {
 			_ = conn.WriteJSON(Message{Type: "error", Content: "recipient_user_id and text fields are required"})
 			continue
 		}
-
 		if msg.RecipientUserID == userID {
 			log.Printf("WARN: ChatHandler: User %d attempting to send message to themselves.", userID)
 			_ = conn.WriteJSON(Message{Type: "error", Content: "Cannot send messages to yourself"})
 			continue
 		}
+
+		mutualLikeParams := migrations.CheckMutualLikeExistsParams{
+			LikerUserID: userID,
+			LikedUserID: msg.RecipientUserID,
+		}
+		mutualLike, err := queries.CheckMutualLikeExists(ctx, mutualLikeParams)
+		if err != nil {
+			log.Printf("ERROR: ChatHandler: Failed to check mutual like between %d and %d: %v", userID, msg.RecipientUserID, err)
+			_ = conn.WriteJSON(Message{Type: "error", Content: "Failed to check chat permission"})
+			continue
+		}
+
+		if !mutualLike.Bool {
+			log.Printf("INFO: ChatHandler: Blocked message from %d to %d (no mutual like)", userID, msg.RecipientUserID)
+			_ = conn.WriteJSON(Message{Type: "error", Content: "You can only message users you have matched with."})
+			continue
+		}
+
+		log.Printf("INFO: ChatHandler: Mutual like confirmed between %d and %d. Proceeding with message.", userID, msg.RecipientUserID)
 
 		createParams := migrations.CreateChatMessageParams{
 			SenderUserID:    userID,
