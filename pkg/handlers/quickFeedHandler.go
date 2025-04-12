@@ -1,25 +1,21 @@
 // FILE: pkg/handlers/quickFeedHandler.go
+// (MODIFIED: Removed request body, fetches user data from DB based on token)
 package handlers
 
 import (
-	"encoding/json"
 	"errors"
-	"fmt"
+	// "fmt" // No longer needed for request body error formatting
 	"log"
 	"net/http"
 
-	"github.com/arnnvv/peeple-api/migrations" // Make sure this import path is correct
+	"github.com/arnnvv/peeple-api/migrations"
 	"github.com/arnnvv/peeple-api/pkg/db"
 	"github.com/arnnvv/peeple-api/pkg/token"
 	"github.com/arnnvv/peeple-api/pkg/utils"
 	"github.com/jackc/pgx/v5"
 )
 
-type QuickFeedRequest struct {
-	Latitude  *float64 `json:"latitude"`
-	Longitude *float64 `json:"longitude"`
-	Gender    *string  `json:"gender"` // Requesting user's gender ("man" or "woman")
-}
+// QuickFeedRequest removed as it's no longer needed.
 
 // Use GetQuickFeedRow as confirmed from queries.sql.go
 type QuickFeedResponse struct {
@@ -31,6 +27,7 @@ type QuickFeedResponse struct {
 const quickFeedLimit = 2
 
 // GetQuickFeedHandler serves the simple two-profile feed.
+// MODIFIED: Now uses GET and retrieves user's location/gender from DB.
 func GetQuickFeedHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	queries := db.GetDB()
@@ -39,6 +36,7 @@ func GetQuickFeedHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// --- Get User ID from Token ---
 	claims, ok := ctx.Value(token.ClaimsContextKey).(*token.Claims)
 	if !ok || claims == nil {
 		utils.RespondWithError(w, http.StatusUnauthorized, "Invalid token claims")
@@ -46,71 +44,74 @@ func GetQuickFeedHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	requestingUserID := int32(claims.UserID)
 
-	if r.Method != http.MethodPost {
-		utils.RespondWithError(w, http.StatusMethodNotAllowed, "Method Not Allowed: Use POST")
+	// --- Changed Method Check to GET ---
+	if r.Method != http.MethodGet {
+		utils.RespondWithError(w, http.StatusMethodNotAllowed, "Method Not Allowed: Use GET")
 		return
 	}
 
-	var req QuickFeedRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		utils.RespondWithError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request body: %v", err))
-		return
-	}
-	defer r.Body.Close()
+	// --- REMOVED Request Body Parsing ---
+	// var req QuickFeedRequest ... json.NewDecoder ...
 
-	// --- Validation ---
-	if req.Latitude == nil || req.Longitude == nil || req.Gender == nil {
-		utils.RespondWithError(w, http.StatusBadRequest, "Missing required fields: latitude, longitude, and gender")
-		return
-	}
-
-	lat := *req.Latitude
-	lon := *req.Longitude
-	requestingGenderStr := *req.Gender
-
-	if lat < -90 || lat > 90 {
-		utils.RespondWithError(w, http.StatusBadRequest, "Invalid latitude")
-		return
-	}
-	if lon < -180 || lon > 180 {
-		utils.RespondWithError(w, http.StatusBadRequest, "Invalid longitude")
+	// --- Fetch Requesting User's Data ---
+	requestingUser, err := queries.GetUserByID(ctx, requestingUserID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			log.Printf("GetQuickFeedHandler: Requesting user %d not found", requestingUserID)
+			utils.RespondWithJSON(w, http.StatusNotFound, QuickFeedResponse{
+				Success: false, Message: "Requesting user account not found.",
+			})
+		} else {
+			log.Printf("GetQuickFeedHandler: Error fetching requesting user %d: %v", requestingUserID, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, "Failed to retrieve user data")
+		}
 		return
 	}
 
-	var requestingGender migrations.GenderEnum   // Keep this for logging if needed
-	var oppositeGender migrations.NullGenderEnum // Use NullGenderEnum for the parameter struct
-	isValidGender := false
+	// --- Validation of Fetched User Data ---
+	if !requestingUser.Latitude.Valid || !requestingUser.Longitude.Valid {
+		log.Printf("GetQuickFeedHandler: Requesting user %d missing required location data.", requestingUserID)
+		utils.RespondWithError(w, http.StatusBadRequest, "Your location is not set. Please update your profile.")
+		return
+	}
+	if !requestingUser.Gender.Valid {
+		log.Printf("GetQuickFeedHandler: Requesting user %d missing required gender data.", requestingUserID)
+		utils.RespondWithError(w, http.StatusBadRequest, "Your gender is not set. Please update your profile.")
+		return
+	}
 
-	if requestingGenderStr == string(migrations.GenderEnumMan) {
-		requestingGender = migrations.GenderEnumMan
+	// --- Determine Opposite Gender based on Fetched Data ---
+	var oppositeGender migrations.NullGenderEnum
+	requestingGender := requestingUser.Gender.GenderEnum // For logging
+
+	if requestingUser.Gender.GenderEnum == migrations.GenderEnumMan {
 		oppositeGender = migrations.NullGenderEnum{GenderEnum: migrations.GenderEnumWoman, Valid: true}
-		isValidGender = true
-	} else if requestingGenderStr == string(migrations.GenderEnumWoman) {
-		requestingGender = migrations.GenderEnumWoman
+	} else if requestingUser.Gender.GenderEnum == migrations.GenderEnumWoman {
 		oppositeGender = migrations.NullGenderEnum{GenderEnum: migrations.GenderEnumMan, Valid: true}
-		isValidGender = true
-	}
-
-	if !isValidGender {
-		utils.RespondWithError(w, http.StatusBadRequest, "Invalid gender specified in request: must be 'man' or 'woman'")
+	} else {
+		// Should be caught by !requestingUser.Gender.Valid check above, but good to be safe
+		log.Printf("GetQuickFeedHandler: Invalid gender '%v' found in database for user %d.", requestingUser.Gender.GenderEnum, requestingUserID)
+		utils.RespondWithError(w, http.StatusInternalServerError, "Invalid gender data found for user")
 		return
 	}
 
-	// --- Database Query ---
-	log.Printf("Fetching quick feed for user %d (lat: %f, lon: %f, gender: %s), showing %s",
-		requestingUserID, lat, lon, requestingGender, oppositeGender.GenderEnum) // Log the enum value
+	// --- Use Fetched Data for Query ---
+	lat := requestingUser.Latitude.Float64
+	lon := requestingUser.Longitude.Float64
 
-	// --- CORRECTED PARAMETER NAMES ---
-	// Use the names from the generated GetQuickFeedParams struct
+	log.Printf("Fetching quick feed for user %d (gender: %s) using DB location (lat: %f, lon: %f), showing %s",
+		requestingUserID, requestingGender, lat, lon, oppositeGender.GenderEnum)
+
+	// --- Prepare DB Parameters ---
 	params := migrations.GetQuickFeedParams{
-		Lat1:   lat,              // Corresponds to $1
-		Lon1:   lon,              // Corresponds to $2
-		ID:     requestingUserID, // Corresponds to $3
-		Gender: oppositeGender,   // Corresponds to $4 (needs NullGenderEnum)
-		Limit:  quickFeedLimit,   // Corresponds to $5
+		Lat1:   lat,              // Fetched latitude
+		Lon1:   lon,              // Fetched longitude
+		ID:     requestingUserID, // User ID from token
+		Gender: oppositeGender,   // Calculated opposite gender
+		Limit:  quickFeedLimit,
 	}
 
-	// Use GetQuickFeedRow as the expected return type
+	// --- Execute Database Query ---
 	profiles, err := queries.GetQuickFeed(ctx, params)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		log.Printf("Error fetching quick feed for user %d: %v", requestingUserID, err)
