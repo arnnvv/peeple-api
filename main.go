@@ -55,6 +55,7 @@ func main() {
 	http.HandleFunc("/api/admin/verifications", token.AdminAuthMiddleware(handlers.GetPendingVerificationsHandler))
 	http.HandleFunc("/api/admin/verify", token.AdminAuthMiddleware(handlers.UpdateVerificationStatusHandler))
 
+	http.HandleFunc("/api/profile/edit", token.AuthMiddleware(handlers.EditProfileHandler))
 	http.HandleFunc("/test", handlers.TestHandler)
 
 	log.Printf("Server is running on http://localhost:%s\n", port)
