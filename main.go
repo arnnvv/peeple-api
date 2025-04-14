@@ -40,6 +40,7 @@ func main() {
 	http.HandleFunc("/api/profile/location-gender", token.AuthMiddleware(handlers.UpdateLocationGenderHandler))
 	http.HandleFunc("/verify", token.AuthMiddleware(handlers.GenerateVerificationPresignedURL))
 	http.HandleFunc("/api/filters", token.AuthMiddleware(handlers.ApplyFiltersHandler))
+	http.HandleFunc("/api/get-filters", token.AuthMiddleware(handlers.GetFiltersHandler)) // <<<--- ADDED THIS LINE
 	http.HandleFunc("/api/app-opened", token.AuthMiddleware(handlers.LogAppOpenHandler))
 	http.HandleFunc("/api/homefeed", token.AuthMiddleware(handlers.GetHomeFeedHandler))
 	http.HandleFunc("/api/quickfeed", token.AuthMiddleware(handlers.GetQuickFeedHandler))
