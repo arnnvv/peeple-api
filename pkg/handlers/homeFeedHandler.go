@@ -19,7 +19,6 @@ import (
 // const defaultPageSize = 15 // Keep this for the LIMIT
 const feedBatchSize = 15 // Renamed constant for clarity
 const defaultAgeRange = 4
-const minFilterAge = 18
 
 // HomeFeedResponse defines the structure for the home feed response (no pagination).
 type HomeFeedResponse struct {
