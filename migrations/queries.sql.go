@@ -345,6 +345,22 @@ func (q *Queries) DecrementUserConsumable(ctx context.Context, arg DecrementUser
 	return i, err
 }
 
+const deleteLikesBetweenUsers = `-- name: DeleteLikesBetweenUsers :exec
+DELETE FROM likes
+WHERE (liker_user_id = $1 AND liked_user_id = $2)
+   OR (liker_user_id = $2 AND liked_user_id = $1)
+`
+
+type DeleteLikesBetweenUsersParams struct {
+	LikerUserID int32
+	LikedUserID int32
+}
+
+func (q *Queries) DeleteLikesBetweenUsers(ctx context.Context, arg DeleteLikesBetweenUsersParams) error {
+	_, err := q.db.Exec(ctx, deleteLikesBetweenUsers, arg.LikerUserID, arg.LikedUserID)
+	return err
+}
+
 const deleteUserDateVibesPrompts = `-- name: DeleteUserDateVibesPrompts :exec
 DELETE FROM date_vibes_prompts WHERE user_id = $1
 `

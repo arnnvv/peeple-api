@@ -343,3 +343,8 @@ WHERE recipient_user_id = $1 AND sender_user_id = $2 AND is_read = false;
 -- name: CheckMutualLikeExists :one
 SELECT EXISTS (SELECT 1 FROM likes l1 WHERE l1.liker_user_id = $1 AND l1.liked_user_id = $2)
    AND EXISTS (SELECT 1 FROM likes l2 WHERE l2.liker_user_id = $2 AND l2.liked_user_id = $1);
+
+-- name: DeleteLikesBetweenUsers :exec
+DELETE FROM likes
+WHERE (liker_user_id = $1 AND liked_user_id = $2)
+   OR (liker_user_id = $2 AND liked_user_id = $1);

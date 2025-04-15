@@ -40,11 +40,12 @@ func main() {
 	http.HandleFunc("/api/profile/location-gender", token.AuthMiddleware(handlers.UpdateLocationGenderHandler))
 	http.HandleFunc("/verify", token.AuthMiddleware(handlers.GenerateVerificationPresignedURL))
 	http.HandleFunc("/api/filters", token.AuthMiddleware(handlers.ApplyFiltersHandler))
-	http.HandleFunc("/api/get-filters", token.AuthMiddleware(handlers.GetFiltersHandler)) // <<<--- ADDED THIS LINE
+	http.HandleFunc("/api/get-filters", token.AuthMiddleware(handlers.GetFiltersHandler))
 	http.HandleFunc("/api/app-opened", token.AuthMiddleware(handlers.LogAppOpenHandler))
 	http.HandleFunc("/api/homefeed", token.AuthMiddleware(handlers.GetHomeFeedHandler))
 	http.HandleFunc("/api/quickfeed", token.AuthMiddleware(handlers.GetQuickFeedHandler))
 	http.HandleFunc("/api/like", token.AuthMiddleware(handlers.LikeHandler))
+	http.HandleFunc("/api/unmatch", token.AuthMiddleware(handlers.UnmatchHandler))
 	http.HandleFunc("/api/dislike", token.AuthMiddleware(handlers.DislikeHandler))
 	http.HandleFunc("/api/iap/verify", token.AuthMiddleware(handlers.VerifyPurchaseHandler))
 	http.HandleFunc("/api/liker-profile/", token.AuthMiddleware(handlers.GetLikerProfileHandler))
