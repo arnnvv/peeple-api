@@ -1,18 +1,28 @@
 // FILE: pkg/handlers/locationGenderHandler.go
-// (NEW FILE)
+// (MODIFIED)
 package handlers
 
 import (
 	"encoding/json"
+	"errors" // Import errors package
 	"fmt"
 	"log"
 	"net/http"
+	"time" // Import time package
 
 	"github.com/arnnvv/peeple-api/migrations"
 	"github.com/arnnvv/peeple-api/pkg/db"
 	"github.com/arnnvv/peeple-api/pkg/token"
 	"github.com/arnnvv/peeple-api/pkg/utils"
+	"github.com/jackc/pgx/v5" // Import pgx
 	"github.com/jackc/pgx/v5/pgtype"
+)
+
+// Constants for default filter settings
+const (
+	defaultFilterRadiusKm = 500
+	defaultFilterAgeRange = 4 // +/- 4 years from user's age
+	minFilterAge          = 18
 )
 
 type UpdateLocationGenderRequest struct {
@@ -27,6 +37,7 @@ type UpdateLocationGenderResponse struct {
 }
 
 // UpdateLocationGenderHandler handles updating only the user's location and gender.
+// ADDED: Also sets default filters upon successful update.
 func UpdateLocationGenderHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	queries := db.GetDB()
@@ -88,7 +99,20 @@ func UpdateLocationGenderHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// --- Database Update ---
+	// --- ADDED: Fetch user data for default filter calculation ---
+	userData, err := queries.GetUserByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			log.Printf("UpdateLocationGenderHandler: User %d not found while fetching for filters", userID)
+			utils.RespondWithError(w, http.StatusNotFound, "User not found")
+		} else {
+			log.Printf("UpdateLocationGenderHandler: Error fetching user %d for filters: %v", userID, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, "Error retrieving user data")
+		}
+		return
+	}
+
+	// --- Database Update (Location/Gender) ---
 	params := migrations.UpdateUserLocationGenderParams{
 		Latitude:  pgtype.Float8{Float64: lat, Valid: true},
 		Longitude: pgtype.Float8{Float64: lon, Valid: true},
@@ -96,7 +120,7 @@ func UpdateLocationGenderHandler(w http.ResponseWriter, r *http.Request) {
 		ID:        userID,
 	}
 
-	_, err := queries.UpdateUserLocationGender(ctx, params)
+	_, err = queries.UpdateUserLocationGender(ctx, params)
 	if err != nil {
 		log.Printf("Error updating location/gender for user %d: %v", userID, err)
 		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to update location and gender")
@@ -104,8 +128,69 @@ func UpdateLocationGenderHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("Successfully updated location and gender for user %d", userID)
+
+	// --- ADDED: Set Default Filters ---
+	log.Printf("UpdateLocationGenderHandler: Setting default filters for user %d", userID)
+
+	// Calculate Default Filters
+	defaultWhoSee := migrations.NullGenderEnum{Valid: false}
+	if genderEnum == migrations.GenderEnumMan {
+		defaultWhoSee = migrations.NullGenderEnum{GenderEnum: migrations.GenderEnumWoman, Valid: true}
+	} else if genderEnum == migrations.GenderEnumWoman {
+		defaultWhoSee = migrations.NullGenderEnum{GenderEnum: migrations.GenderEnumMan, Valid: true}
+	}
+
+	defaultAgeMin := pgtype.Int4{Valid: false}
+	defaultAgeMax := pgtype.Int4{Valid: false}
+	if userData.DateOfBirth.Valid && !userData.DateOfBirth.Time.IsZero() {
+		age := int(time.Since(userData.DateOfBirth.Time).Hours() / 24 / 365.25)
+		if age >= minFilterAge {
+			calcAgeMin := age - defaultFilterAgeRange
+			if calcAgeMin < minFilterAge {
+				calcAgeMin = minFilterAge
+			}
+			defaultAgeMin = pgtype.Int4{Int32: int32(calcAgeMin), Valid: true}
+
+			calcAgeMax := age + defaultFilterAgeRange
+			// Ensure max is at least min, and at least minFilterAge
+			if calcAgeMax < calcAgeMin {
+				calcAgeMax = calcAgeMin
+			}
+			if calcAgeMax < minFilterAge {
+				calcAgeMax = minFilterAge
+			}
+			defaultAgeMax = pgtype.Int4{Int32: int32(calcAgeMax), Valid: true}
+			log.Printf("UpdateLocationGenderHandler: User %d age %d, calculated default filter age range: %d-%d", userID, age, calcAgeMin, calcAgeMax)
+		} else {
+			log.Printf("UpdateLocationGenderHandler: User %d age %d is less than min filter age %d, cannot set default age range.", userID, age, minFilterAge)
+		}
+	} else {
+		log.Printf("UpdateLocationGenderHandler: User %d has no valid DOB, cannot set default age range.", userID)
+	}
+
+	// Prepare filter upsert parameters
+	defaultFilterParams := migrations.UpsertUserFiltersParams{
+		UserID:          userID,
+		WhoYouWantToSee: defaultWhoSee,
+		RadiusKm:        pgtype.Int4{Int32: defaultFilterRadiusKm, Valid: true},
+		ActiveToday:     false, // Explicitly set to false as requested
+		AgeMin:          defaultAgeMin,
+		AgeMax:          defaultAgeMax,
+	}
+
+	// Upsert the default filters
+	_, filterErr := queries.UpsertUserFilters(ctx, defaultFilterParams)
+	if filterErr != nil {
+		// Log the error but don't fail the overall request, as location/gender succeeded
+		log.Printf("WARN: UpdateLocationGenderHandler: Failed to upsert default filters for user %d after location/gender update: %v", userID, filterErr)
+	} else {
+		log.Printf("UpdateLocationGenderHandler: Successfully upserted default filters for user %d", userID)
+	}
+	// --- END ADDED Filter Logic ---
+
+	// Return success for the primary operation (location/gender update)
 	utils.RespondWithJSON(w, http.StatusOK, UpdateLocationGenderResponse{
 		Success: true,
-		Message: "Location and gender updated successfully",
+		Message: "Location and gender updated successfully", // Message reflects the main goal
 	})
 }
