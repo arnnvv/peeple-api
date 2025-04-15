@@ -551,6 +551,51 @@ func (ns NullReligion) Value() (driver.Value, error) {
 	return string(ns.Religion), nil
 }
 
+type ReportReason string
+
+const (
+	ReportReasonNotInterested ReportReason = "notInterested"
+	ReportReasonFakeProfile   ReportReason = "fakeProfile"
+	ReportReasonInappropriate ReportReason = "inappropriate"
+	ReportReasonMinor         ReportReason = "minor"
+	ReportReasonSpam          ReportReason = "spam"
+)
+
+func (e *ReportReason) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ReportReason(s)
+	case string:
+		*e = ReportReason(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ReportReason: %T", src)
+	}
+	return nil
+}
+
+type NullReportReason struct {
+	ReportReason ReportReason
+	Valid        bool // Valid is true if ReportReason is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullReportReason) Scan(value interface{}) error {
+	if value == nil {
+		ns.ReportReason, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ReportReason.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullReportReason) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ReportReason), nil
+}
+
 type StoryTimePromptType string
 
 const (
@@ -765,6 +810,14 @@ type MyTypePrompt struct {
 	UserID   int32
 	Question MyTypePromptType
 	Answer   string
+}
+
+type Report struct {
+	ID             int64
+	ReporterUserID int32
+	ReportedUserID int32
+	Reason         ReportReason
+	CreatedAt      pgtype.Timestamptz
 }
 
 type StoryTimePrompt struct {

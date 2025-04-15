@@ -46,6 +46,7 @@ func main() {
 	http.HandleFunc("/api/quickfeed", token.AuthMiddleware(handlers.GetQuickFeedHandler))
 	http.HandleFunc("/api/like", token.AuthMiddleware(handlers.LikeHandler))
 	http.HandleFunc("/api/unmatch", token.AuthMiddleware(handlers.UnmatchHandler))
+	http.HandleFunc("/api/report", token.AuthMiddleware(handlers.ReportHandler))
 	http.HandleFunc("/api/dislike", token.AuthMiddleware(handlers.DislikeHandler))
 	http.HandleFunc("/api/iap/verify", token.AuthMiddleware(handlers.VerifyPurchaseHandler))
 	http.HandleFunc("/api/liker-profile/", token.AuthMiddleware(handlers.GetLikerProfileHandler))

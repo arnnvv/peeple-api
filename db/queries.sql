@@ -348,3 +348,13 @@ SELECT EXISTS (SELECT 1 FROM likes l1 WHERE l1.liker_user_id = $1 AND l1.liked_u
 DELETE FROM likes
 WHERE (liker_user_id = $1 AND liked_user_id = $2)
    OR (liker_user_id = $2 AND liked_user_id = $1);
+
+-- name: CreateReport :one
+INSERT INTO reports (
+    reporter_user_id,
+    reported_user_id,
+    reason
+) VALUES (
+    $1, $2, $3
+)
+RETURNING id, reporter_user_id, reported_user_id, reason, created_at;

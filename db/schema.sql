@@ -107,6 +107,13 @@ CREATE TYPE content_like_type AS ENUM (
 );
 COMMENT ON TYPE content_like_type IS 'Specifies the type of profile content being liked.';
 
+CREATE TYPE report_reason AS ENUM (
+    'notInterested',
+    'fakeProfile',
+    'inappropriate',
+    'minor',
+    'spam'
+);
 
 -- =============================================
 -- START: Table Definitions
@@ -307,3 +314,15 @@ COMMENT ON COLUMN chat_messages.is_read IS 'Flag indicating if the recipient has
 CREATE INDEX idx_chat_messages_conversation ON chat_messages (sender_user_id, recipient_user_id, sent_at DESC);
 CREATE INDEX idx_chat_messages_recipient_time ON chat_messages (recipient_user_id, sent_at DESC);
 CREATE INDEX idx_chat_messages_recipient_unread ON chat_messages (recipient_user_id, is_read) WHERE is_read = false;
+
+CREATE TABLE reports (
+    id BIGSERIAL PRIMARY KEY,
+    reporter_user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    reported_user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    reason report_reason NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT reporter_cannot_be_reported CHECK (reporter_user_id <> reported_user_id)
+);
+
+CREATE INDEX idx_reports_reporter_user_id ON reports(reporter_user_id);
+CREATE INDEX idx_reports_reported_user_id ON reports(reported_user_id);

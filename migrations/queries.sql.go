@@ -250,6 +250,36 @@ func (q *Queries) CreateMyTypePrompt(ctx context.Context, arg CreateMyTypePrompt
 	return i, err
 }
 
+const createReport = `-- name: CreateReport :one
+INSERT INTO reports (
+    reporter_user_id,
+    reported_user_id,
+    reason
+) VALUES (
+    $1, $2, $3
+)
+RETURNING id, reporter_user_id, reported_user_id, reason, created_at
+`
+
+type CreateReportParams struct {
+	ReporterUserID int32
+	ReportedUserID int32
+	Reason         ReportReason
+}
+
+func (q *Queries) CreateReport(ctx context.Context, arg CreateReportParams) (Report, error) {
+	row := q.db.QueryRow(ctx, createReport, arg.ReporterUserID, arg.ReportedUserID, arg.Reason)
+	var i Report
+	err := row.Scan(
+		&i.ID,
+		&i.ReporterUserID,
+		&i.ReportedUserID,
+		&i.Reason,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createStoryTimePrompt = `-- name: CreateStoryTimePrompt :one
 INSERT INTO story_time_prompts (user_id, question, answer)
 VALUES ($1, $2, $3)
