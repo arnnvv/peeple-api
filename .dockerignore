@@ -5,6 +5,8 @@ api
 assets/
 .github/
 sqlc.yml
+README.md
 .gitignore
 .env.example
+delete_data.sql
 seed_test_data.sql
