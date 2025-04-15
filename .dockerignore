@@ -7,6 +7,11 @@ assets/
 sqlc.yml
 README.md
 .gitignore
+digest.txt
 .env.example
+package.json
+node_modules/
+pnpm-lock.yaml
 delete_data.sql
+drizzle.config.ts
 seed_test_data.sql

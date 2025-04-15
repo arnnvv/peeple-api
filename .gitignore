@@ -1,3 +1,7 @@
 api
 .env
 digest.txt
+package.json
+node_modules/
+pnpm-lock.yaml
+drizzle.config.ts
