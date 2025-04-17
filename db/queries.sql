@@ -204,6 +204,7 @@ WHERE liker_user_id = $1
 
 -- name: GetHomeFeed :many
 -- Retrieves the main feed based on user filters and location.
+-- *** MODIFIED TO INCLUDE PROMPTS ***
 WITH RequestingUser AS (
     SELECT
         u.id, u.latitude, u.longitude, u.gender, u.date_of_birth, u.spotlight_active_until
@@ -212,14 +213,34 @@ WITH RequestingUser AS (
     SELECT
         f.user_id, f.who_you_want_to_see, f.radius_km, f.active_today, f.age_min, f.age_max
     FROM filters f WHERE f.user_id = $1
+), AllPrompts AS (
+    -- Combine all prompts for all users into a single structure with category
+    SELECT user_id, 'storyTime' as category, question::text, answer FROM story_time_prompts
+    UNION ALL
+    SELECT user_id, 'myType' as category, question::text, answer FROM my_type_prompts
+    UNION ALL
+    SELECT user_id, 'gettingPersonal' as category, question::text, answer FROM getting_personal_prompts
+    UNION ALL
+    SELECT user_id, 'dateVibes' as category, question::text, answer FROM date_vibes_prompts
+), AggregatedPrompts AS (
+    -- Aggregate combined prompts into a JSONB array for each user
+    SELECT
+        user_id,
+        jsonb_agg(jsonb_build_object('category', category, 'question', question, 'answer', answer)) as prompts
+    FROM AllPrompts
+    GROUP BY user_id
 )
 SELECT
-    target_user.*,
+    target_user.*, -- Select all columns from the users table
+    -- Aggregate prompts for the target user, default to empty array if none
+    COALESCE(ap.prompts, '[]'::jsonb) as prompts,
+    -- Calculate distance
     haversine(ru.latitude, ru.longitude, target_user.latitude, target_user.longitude) AS distance_km
 FROM users AS target_user
 JOIN RequestingUser ru ON target_user.id != ru.id
 JOIN RequestingUserFilters rf ON ru.id = rf.user_id
 LEFT JOIN filters AS target_user_filters ON target_user.id = target_user_filters.user_id
+LEFT JOIN AggregatedPrompts ap ON target_user.id = ap.user_id -- Join with aggregated prompts
 WHERE
     target_user.latitude IS NOT NULL AND target_user.longitude IS NOT NULL -- Ensure target has location
     AND ru.latitude IS NOT NULL AND ru.longitude IS NOT NULL             -- Ensure requesting user has location
@@ -248,7 +269,6 @@ ORDER BY
       NULL -- Or some other default ordering if DOB is missing
     END ASC NULLS LAST
 LIMIT $2; -- Param $2 is the feed batch size (e.g., 15)
-
 -- name: GetQuickFeed :many
 -- Retrieves a small feed based purely on proximity and opposite gender.
 -- Parameters: $1=latitude, $2=longitude (of requesting user), $3=requesting_user_id, $4=gender_to_show, $5=limit

@@ -512,14 +512,34 @@ WITH RequestingUser AS (
     SELECT
         f.user_id, f.who_you_want_to_see, f.radius_km, f.active_today, f.age_min, f.age_max
     FROM filters f WHERE f.user_id = $1
+), AllPrompts AS (
+    -- Combine all prompts for all users into a single structure with category
+    SELECT user_id, 'storyTime' as category, question::text, answer FROM story_time_prompts
+    UNION ALL
+    SELECT user_id, 'myType' as category, question::text, answer FROM my_type_prompts
+    UNION ALL
+    SELECT user_id, 'gettingPersonal' as category, question::text, answer FROM getting_personal_prompts
+    UNION ALL
+    SELECT user_id, 'dateVibes' as category, question::text, answer FROM date_vibes_prompts
+), AggregatedPrompts AS (
+    -- Aggregate combined prompts into a JSONB array for each user
+    SELECT
+        user_id,
+        jsonb_agg(jsonb_build_object('category', category, 'question', question, 'answer', answer)) as prompts
+    FROM AllPrompts
+    GROUP BY user_id
 )
 SELECT
-    target_user.id, target_user.created_at, target_user.name, target_user.last_name, target_user.email, target_user.date_of_birth, target_user.latitude, target_user.longitude, target_user.gender, target_user.dating_intention, target_user.height, target_user.hometown, target_user.job_title, target_user.education, target_user.religious_beliefs, target_user.drinking_habit, target_user.smoking_habit, target_user.media_urls, target_user.verification_status, target_user.verification_pic, target_user.role, target_user.audio_prompt_question, target_user.audio_prompt_answer, target_user.spotlight_active_until,
+    target_user.id, target_user.created_at, target_user.name, target_user.last_name, target_user.email, target_user.date_of_birth, target_user.latitude, target_user.longitude, target_user.gender, target_user.dating_intention, target_user.height, target_user.hometown, target_user.job_title, target_user.education, target_user.religious_beliefs, target_user.drinking_habit, target_user.smoking_habit, target_user.media_urls, target_user.verification_status, target_user.verification_pic, target_user.role, target_user.audio_prompt_question, target_user.audio_prompt_answer, target_user.spotlight_active_until, -- Select all columns from the users table
+    -- Aggregate prompts for the target user, default to empty array if none
+    COALESCE(ap.prompts, '[]'::jsonb) as prompts,
+    -- Calculate distance
     haversine(ru.latitude, ru.longitude, target_user.latitude, target_user.longitude) AS distance_km
 FROM users AS target_user
 JOIN RequestingUser ru ON target_user.id != ru.id
 JOIN RequestingUserFilters rf ON ru.id = rf.user_id
 LEFT JOIN filters AS target_user_filters ON target_user.id = target_user_filters.user_id
+LEFT JOIN AggregatedPrompts ap ON target_user.id = ap.user_id -- Join with aggregated prompts
 WHERE
     target_user.latitude IS NOT NULL AND target_user.longitude IS NOT NULL -- Ensure target has location
     AND ru.latitude IS NOT NULL AND ru.longitude IS NOT NULL             -- Ensure requesting user has location
@@ -580,10 +600,12 @@ type GetHomeFeedRow struct {
 	AudioPromptQuestion  NullAudioPrompt
 	AudioPromptAnswer    pgtype.Text
 	SpotlightActiveUntil pgtype.Timestamptz
+	Prompts              []byte
 	DistanceKm           float64
 }
 
 // Retrieves the main feed based on user filters and location.
+// *** MODIFIED TO INCLUDE PROMPTS ***
 func (q *Queries) GetHomeFeed(ctx context.Context, arg GetHomeFeedParams) ([]GetHomeFeedRow, error) {
 	rows, err := q.db.Query(ctx, getHomeFeed, arg.ID, arg.Limit)
 	if err != nil {
@@ -618,6 +640,7 @@ func (q *Queries) GetHomeFeed(ctx context.Context, arg GetHomeFeedParams) ([]Get
 			&i.AudioPromptQuestion,
 			&i.AudioPromptAnswer,
 			&i.SpotlightActiveUntil,
+			&i.Prompts,
 			&i.DistanceKm,
 		); err != nil {
 			return nil, err
@@ -766,7 +789,6 @@ func (q *Queries) GetPendingVerificationUsers(ctx context.Context, verificationS
 }
 
 const getQuickFeed = `-- name: GetQuickFeed :many
-
 SELECT
     target_user.id, target_user.created_at, target_user.name, target_user.last_name, target_user.email, target_user.date_of_birth, target_user.latitude, target_user.longitude, target_user.gender, target_user.dating_intention, target_user.height, target_user.hometown, target_user.job_title, target_user.education, target_user.religious_beliefs, target_user.drinking_habit, target_user.smoking_habit, target_user.media_urls, target_user.verification_status, target_user.verification_pic, target_user.role, target_user.audio_prompt_question, target_user.audio_prompt_answer, target_user.spotlight_active_until,
     haversine($1, $2, target_user.latitude, target_user.longitude) AS distance_km
