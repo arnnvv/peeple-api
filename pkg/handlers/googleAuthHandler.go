@@ -1,6 +1,9 @@
+// FILE: pkg/handlers/googleAuthHandler.go
+// (MODIFIED TO GRANT DEFAULT ROSE ON NEW USER CREATION)
 package handlers
 
 import (
+	"context" // Import context package
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -190,11 +193,12 @@ func GoogleAuthHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
 			log.Printf("User with email '%s' not found. Creating new user.", tokenInfo.Email)
+			// --- Create the User ---
 			newUser, createErr := queries.CreateUserWithEmail(ctx, tokenInfo.Email)
 			if createErr != nil {
 				log.Printf("CRITICAL: Failed to create user for email '%s': %v", tokenInfo.Email, createErr)
 				var pgErr *pgconn.PgError
-				if errors.As(createErr, &pgErr) && pgErr.Code == "23505" {
+				if errors.As(createErr, &pgErr) && pgErr.Code == "23505" { // Check for unique constraint violation
 					utils.RespondWithJSON(w, http.StatusConflict, GoogleAuthResponse{Success: false, Message: "Email already exists (concurrent registration?)"})
 				} else {
 					utils.RespondWithJSON(w, http.StatusInternalServerError, GoogleAuthResponse{Success: false, Message: "Failed to create user account"})
@@ -203,6 +207,24 @@ func GoogleAuthHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			log.Printf("New user created successfully: ID=%d, Email=%s", newUser.ID, newUser.Email)
 			appUser = newUser
+
+			// --- Grant Default Rose ---
+			// ADDED: Grant 1 Rose to the newly created user
+			log.Printf("Granting 1 default Rose to new user ID: %d", appUser.ID)
+			roseParams := migrations.UpsertUserConsumableParams{
+				UserID:         appUser.ID,
+				ConsumableType: migrations.PremiumFeatureTypeRose,
+				Quantity:       1, // Grant exactly 1 rose
+			}
+			_, roseErr := queries.UpsertUserConsumable(context.Background(), roseParams) // Use Background context or ctx
+			if roseErr != nil {
+				// Log the error, but don't fail the login process just because the rose grant failed
+				log.Printf("WARNING: Failed to grant default rose to user ID %d: %v", appUser.ID, roseErr)
+			} else {
+				log.Printf("Successfully granted 1 default Rose to user ID %d", appUser.ID)
+			}
+			// --- End Grant Default Rose ---
+
 		} else {
 			log.Printf("Database error looking up user by email '%s': %v", tokenInfo.Email, err)
 			utils.RespondWithJSON(w, http.StatusInternalServerError, GoogleAuthResponse{Success: false, Message: "Database error checking user"})
@@ -212,6 +234,7 @@ func GoogleAuthHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Existing user found: ID=%d, Email=%s", appUser.ID, appUser.Email)
 	}
 
+	// --- Generate App Token ---
 	appToken, err := token.GenerateToken(appUser.ID)
 	if err != nil {
 		log.Printf("Failed to generate application token for user ID %d: %v", appUser.ID, err)
