@@ -1,10 +1,10 @@
 package handlers
 
 import (
+	"encoding/json" // Import json package
 	"errors"
 	"log"
 	"net/http"
-	// "strconv" // No longer needed for page parsing
 	"time"
 
 	"github.com/arnnvv/peeple-api/migrations"
@@ -16,21 +16,53 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// const defaultPageSize = 15 // Keep this for the LIMIT
-const feedBatchSize = 15 // Renamed constant for clarity
+const feedBatchSize = 15
 const defaultAgeRange = 4
 
-// HomeFeedResponse defines the structure for the home feed response (no pagination).
+// --- NEW: DTO for profile items in the response ---
+// This includes all fields from GetHomeFeedRow PLUS the correctly typed Prompts
+type ProfileFeedItem struct {
+	// Embed all fields from migrations.User directly for simplicity
+	// (or list them explicitly if you prefer more control)
+	ID                   int32                                `json:"ID"` // Use uppercase ID as in desired JSON
+	CreatedAt            pgtype.Timestamptz                   `json:"CreatedAt"`
+	Name                 pgtype.Text                          `json:"Name"`
+	LastName             pgtype.Text                          `json:"LastName"`
+	Email                string                               `json:"Email"`
+	DateOfBirth          pgtype.Date                          `json:"DateOfBirth"`
+	Latitude             pgtype.Float8                        `json:"Latitude"`
+	Longitude            pgtype.Float8                        `json:"Longitude"`
+	Gender               migrations.NullGenderEnum            `json:"Gender"`
+	DatingIntention      migrations.NullDatingIntention       `json:"DatingIntention"`
+	Height               pgtype.Float8                        `json:"Height"` // Keep raw height if needed, or format here
+	Hometown             pgtype.Text                          `json:"Hometown"`
+	JobTitle             pgtype.Text                          `json:"JobTitle"`
+	Education            pgtype.Text                          `json:"Education"`
+	ReligiousBeliefs     migrations.NullReligion              `json:"ReligiousBeliefs"`
+	DrinkingHabit        migrations.NullDrinkingSmokingHabits `json:"DrinkingHabit"`
+	SmokingHabit         migrations.NullDrinkingSmokingHabits `json:"SmokingHabit"`
+	MediaUrls            []string                             `json:"MediaUrls"`
+	VerificationStatus   migrations.VerificationStatus        `json:"VerificationStatus"`
+	VerificationPic      pgtype.Text                          `json:"VerificationPic"`
+	Role                 migrations.UserRole                  `json:"Role"`
+	AudioPromptQuestion  migrations.NullAudioPrompt           `json:"AudioPromptQuestion"`
+	AudioPromptAnswer    pgtype.Text                          `json:"AudioPromptAnswer"`
+	SpotlightActiveUntil pgtype.Timestamptz                   `json:"SpotlightActiveUntil"`
+
+	// --- Added fields from GetHomeFeedRow (beyond User) ---
+	Prompts    json.RawMessage `json:"prompts"`     // Use json.RawMessage for JSONB data
+	DistanceKm float64         `json:"distance_km"` // Include distance
+}
+
+// Updated HomeFeedResponse to use the new DTO slice
 type HomeFeedResponse struct {
-	Success  bool                        `json:"success"`
-	Message  string                      `json:"message,omitempty"`
-	Profiles []migrations.GetHomeFeedRow `json:"profiles,omitempty"`
-	// Page     int                         `json:"page,omitempty"` // REMOVED
-	HasMore bool `json:"has_more"` // Indicates if more un-actioned profiles might exist
+	Success  bool              `json:"success"`
+	Message  string            `json:"message,omitempty"`
+	Profiles []ProfileFeedItem `json:"profiles,omitempty"` // Changed type here
+	HasMore  bool              `json:"has_more"`
 }
 
 // GetHomeFeedHandler handles GET requests to retrieve the user's home feed.
-// Fetches a batch of profiles excluding previously liked/disliked ones. No pagination params.
 func GetHomeFeedHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	ctx := r.Context()
@@ -55,6 +87,7 @@ func GetHomeFeedHandler(w http.ResponseWriter, r *http.Request) {
 	// --- Get Requesting User's necessary info (Location, Gender, DOB) ---
 	requestingUser, err := queries.GetUserByID(ctx, requestingUserID)
 	if err != nil {
+		// ... (error handling as before) ...
 		if errors.Is(err, pgx.ErrNoRows) {
 			log.Printf("GetHomeFeedHandler: Requesting user %d not found", requestingUserID)
 			utils.RespondWithJSON(w, http.StatusNotFound, HomeFeedResponse{
@@ -71,6 +104,7 @@ func GetHomeFeedHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Check if user has location set (required for distance calc)
 	if !requestingUser.Latitude.Valid || !requestingUser.Longitude.Valid {
+		// ... (error handling as before) ...
 		log.Printf("GetHomeFeedHandler: Requesting user %d missing location data.", requestingUserID)
 		utils.RespondWithJSON(w, http.StatusBadRequest, HomeFeedResponse{
 			Success: false, Message: "Please set your location in your profile to use the feed.",
@@ -121,12 +155,13 @@ func GetHomeFeedHandler(w http.ResponseWriter, r *http.Request) {
 				AgeMin:          defaultAgeMin,
 				AgeMax:          defaultAgeMax,
 				ActiveToday:     false,
-				RadiusKm:        pgtype.Int4{Valid: false},
+				RadiusKm:        pgtype.Int4{Valid: false}, // Let DB handle default or keep null
 			}
 
 			// Insert the defaults
 			_, upsertErr := queries.UpsertUserFilters(ctx, defaultParams)
 			if upsertErr != nil {
+				// ... (error handling as before) ...
 				log.Printf("GetHomeFeedHandler: Failed to insert default filters for user %d: %v", requestingUserID, upsertErr)
 				utils.RespondWithJSON(w, http.StatusInternalServerError, HomeFeedResponse{
 					Success: false, Message: "Failed to initialize user filters.",
@@ -136,7 +171,7 @@ func GetHomeFeedHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("GetHomeFeedHandler: Default filters created successfully for user %d.", requestingUserID)
 
 		} else {
-			// Handle other potential errors fetching filters
+			// ... (error handling as before) ...
 			log.Printf("GetHomeFeedHandler: Error fetching filters for user %d: %v", requestingUserID, err)
 			utils.RespondWithJSON(w, http.StatusInternalServerError, HomeFeedResponse{
 				Success: false, Message: "Error retrieving user filters.",
@@ -146,28 +181,25 @@ func GetHomeFeedHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// Filters now exist (either pre-existing or default)
 
-	// --- REMOVED Pagination Logic ---
-	// pageStr := r.URL.Query().Get("page") ...
-	// offset := (page - 1) * feedBatchSize
-
 	// --- Execute Feed Query ---
 	log.Printf("GetHomeFeedHandler: Fetching feed batch (limit %d) for user %d", feedBatchSize, requestingUserID)
 	// The GetHomeFeedParams struct generated by sqlc should now only have ID and Limit
 	feedParams := migrations.GetHomeFeedParams{
 		ID:    requestingUserID,
-		Limit: int32(feedBatchSize), // Use the batch size constant
-		// Offset field removed from params struct by sqlc regenerate
+		Limit: int32(feedBatchSize),
 	}
 
-	profiles, err := queries.GetHomeFeed(ctx, feedParams)
+	// Use the updated Row struct from the generated code
+	dbProfiles, err := queries.GetHomeFeed(ctx, feedParams) // dbProfiles is []migrations.GetHomeFeedRow
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		// ... (error handling as before) ...
 		log.Printf("GetHomeFeedHandler: Database error fetching feed for user %d: %v", requestingUserID, err)
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) {
 			log.Printf("DB Error Details: Code=%s, Message=%s", pgErr.Code, pgErr.Message)
-			if pgErr.Code == "42883" {
+			if pgErr.Code == "42883" { // Example check
 				utils.RespondWithJSON(w, http.StatusInternalServerError, HomeFeedResponse{
-					Success: false, Message: "Server configuration error (missing distance function).",
+					Success: false, Message: "Server configuration error (e.g., missing distance function).",
 				})
 				return
 			}
@@ -178,20 +210,52 @@ func GetHomeFeedHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if profiles == nil {
-		profiles = []migrations.GetHomeFeedRow{}
+	// --- Map DB results to the Response DTO ---
+	responseProfiles := make([]ProfileFeedItem, 0, len(dbProfiles))
+	if dbProfiles != nil {
+		for _, dbProfile := range dbProfiles {
+			responseItem := ProfileFeedItem{
+				// Map fields explicitly - this ensures correct structure
+				ID:                   dbProfile.ID,
+				CreatedAt:            dbProfile.CreatedAt,
+				Name:                 dbProfile.Name,
+				LastName:             dbProfile.LastName,
+				Email:                dbProfile.Email,
+				DateOfBirth:          dbProfile.DateOfBirth,
+				Latitude:             dbProfile.Latitude,
+				Longitude:            dbProfile.Longitude,
+				Gender:               dbProfile.Gender,
+				DatingIntention:      dbProfile.DatingIntention,
+				Height:               dbProfile.Height, // Keep raw, formatting done on frontend if needed
+				Hometown:             dbProfile.Hometown,
+				JobTitle:             dbProfile.JobTitle,
+				Education:            dbProfile.Education,
+				ReligiousBeliefs:     dbProfile.ReligiousBeliefs,
+				DrinkingHabit:        dbProfile.DrinkingHabit,
+				SmokingHabit:         dbProfile.SmokingHabit,
+				MediaUrls:            dbProfile.MediaUrls,
+				VerificationStatus:   dbProfile.VerificationStatus,
+				VerificationPic:      dbProfile.VerificationPic,
+				Role:                 dbProfile.Role,
+				AudioPromptQuestion:  dbProfile.AudioPromptQuestion,
+				AudioPromptAnswer:    dbProfile.AudioPromptAnswer,
+				SpotlightActiveUntil: dbProfile.SpotlightActiveUntil,
+				Prompts:              dbProfile.Prompts, // Assign the []byte directly to json.RawMessage
+				DistanceKm:           dbProfile.DistanceKm,
+			}
+			responseProfiles = append(responseProfiles, responseItem)
+		}
 	}
-	log.Printf("GetHomeFeedHandler: Found %d profiles for user %d", len(profiles), requestingUserID)
 
-	// --- Determine if more pages exist (still relevant) ---
-	// If we got exactly the batch size, assume there might be more un-actioned profiles available.
-	hasMore := len(profiles) == feedBatchSize
+	log.Printf("GetHomeFeedHandler: Found %d profiles for user %d", len(responseProfiles), requestingUserID)
+
+	// Determine if more pages exist
+	hasMore := len(responseProfiles) == feedBatchSize
 
 	// --- Respond ---
 	utils.RespondWithJSON(w, http.StatusOK, HomeFeedResponse{
 		Success:  true,
-		Profiles: profiles,
-		// Page:     page, // REMOVED
-		HasMore: hasMore,
+		Profiles: responseProfiles, // Use the mapped slice
+		HasMore:  hasMore,
 	})
 }
