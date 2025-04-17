@@ -20,9 +20,11 @@ import (
 
 // Constants for default filter settings
 const (
-	defaultFilterRadiusKm = 500
-	defaultFilterAgeRange = 4 // +/- 4 years from user's age
-	minFilterAge          = 18
+	defaultFilterRadiusKm    = 500
+	defaultFilterAgeRange    = 4 // +/- 4 years from user's age
+	minFilterAge             = 18
+	fixedDefaultFilterMinAge = 18 // <-- ADDED Fixed Default Min Age
+	fixedDefaultFilterMaxAge = 55 // <-- ADDED Fixed Default Max Age
 )
 
 type UpdateLocationGenderRequest struct {
@@ -129,7 +131,7 @@ func UpdateLocationGenderHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Successfully updated location and gender for user %d", userID)
 
-	// --- ADDED: Set Default Filters ---
+	// --- MODIFIED: Set Default Filters ---
 	log.Printf("UpdateLocationGenderHandler: Setting default filters for user %d", userID)
 
 	// Calculate Default Filters
@@ -142,6 +144,8 @@ func UpdateLocationGenderHandler(w http.ResponseWriter, r *http.Request) {
 
 	defaultAgeMin := pgtype.Int4{Valid: false}
 	defaultAgeMax := pgtype.Int4{Valid: false}
+
+	// Try to calculate based on DOB if available
 	if userData.DateOfBirth.Valid && !userData.DateOfBirth.Time.IsZero() {
 		age := int(time.Since(userData.DateOfBirth.Time).Hours() / 24 / 365.25)
 		if age >= minFilterAge {
@@ -149,23 +153,28 @@ func UpdateLocationGenderHandler(w http.ResponseWriter, r *http.Request) {
 			if calcAgeMin < minFilterAge {
 				calcAgeMin = minFilterAge
 			}
-			defaultAgeMin = pgtype.Int4{Int32: int32(calcAgeMin), Valid: true}
+			defaultAgeMin = pgtype.Int4{Int32: int32(calcAgeMin), Valid: true} // Set Valid to true
 
 			calcAgeMax := age + defaultFilterAgeRange
-			// Ensure max is at least min, and at least minFilterAge
 			if calcAgeMax < calcAgeMin {
 				calcAgeMax = calcAgeMin
 			}
 			if calcAgeMax < minFilterAge {
 				calcAgeMax = minFilterAge
 			}
-			defaultAgeMax = pgtype.Int4{Int32: int32(calcAgeMax), Valid: true}
+			defaultAgeMax = pgtype.Int4{Int32: int32(calcAgeMax), Valid: true} // Set Valid to true
 			log.Printf("UpdateLocationGenderHandler: User %d age %d, calculated default filter age range: %d-%d", userID, age, calcAgeMin, calcAgeMax)
 		} else {
-			log.Printf("UpdateLocationGenderHandler: User %d age %d is less than min filter age %d, cannot set default age range.", userID, age, minFilterAge)
+			log.Printf("UpdateLocationGenderHandler: User %d age %d is less than min filter age %d. Using fixed defaults.", userID, age, minFilterAge)
+			// Fallback to fixed defaults if calculated age is too low
+			defaultAgeMin = pgtype.Int4{Int32: fixedDefaultFilterMinAge, Valid: true}
+			defaultAgeMax = pgtype.Int4{Int32: fixedDefaultFilterMaxAge, Valid: true}
 		}
 	} else {
-		log.Printf("UpdateLocationGenderHandler: User %d has no valid DOB, cannot set default age range.", userID)
+		// *** ADDED ELSE BLOCK: Use fixed defaults if DOB is not valid ***
+		log.Printf("UpdateLocationGenderHandler: User %d has no valid DOB. Using fixed default age range: %d-%d.", userID, fixedDefaultFilterMinAge, fixedDefaultFilterMaxAge)
+		defaultAgeMin = pgtype.Int4{Int32: fixedDefaultFilterMinAge, Valid: true}
+		defaultAgeMax = pgtype.Int4{Int32: fixedDefaultFilterMaxAge, Valid: true}
 	}
 
 	// Prepare filter upsert parameters
@@ -173,9 +182,9 @@ func UpdateLocationGenderHandler(w http.ResponseWriter, r *http.Request) {
 		UserID:          userID,
 		WhoYouWantToSee: defaultWhoSee,
 		RadiusKm:        pgtype.Int4{Int32: defaultFilterRadiusKm, Valid: true},
-		ActiveToday:     false, // Explicitly set to false as requested
-		AgeMin:          defaultAgeMin,
-		AgeMax:          defaultAgeMax,
+		ActiveToday:     false,         // Explicitly set to false as requested
+		AgeMin:          defaultAgeMin, // Will now have a valid value
+		AgeMax:          defaultAgeMax, // Will now have a valid value
 	}
 
 	// Upsert the default filters
@@ -186,7 +195,7 @@ func UpdateLocationGenderHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		log.Printf("UpdateLocationGenderHandler: Successfully upserted default filters for user %d", userID)
 	}
-	// --- END ADDED Filter Logic ---
+	// --- END MODIFIED Filter Logic ---
 
 	// Return success for the primary operation (location/gender update)
 	utils.RespondWithJSON(w, http.StatusOK, UpdateLocationGenderResponse{
