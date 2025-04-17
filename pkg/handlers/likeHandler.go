@@ -1,3 +1,5 @@
+// FILE: pkg/handlers/likeHandler.go
+// (MODIFIED to handle audio_prompt likes)
 package handlers
 
 import (
@@ -27,7 +29,7 @@ const maxCommentLength = 140
 // ContentLikeRequest defined...
 type ContentLikeRequest struct {
 	LikedUserID       int32                      `json:"liked_user_id"`
-	ContentType       migrations.ContentLikeType `json:"content_type"`
+	ContentType       migrations.ContentLikeType `json:"content_type"` // This now includes AudioPrompt
 	ContentIdentifier string                     `json:"content_identifier"`
 	Comment           *string                    `json:"comment,omitempty"`
 	InteractionType   *string                    `json:"interaction_type,omitempty"`
@@ -88,12 +90,22 @@ func LikeHandler(w http.ResponseWriter, r *http.Request) {
 		utils.RespondWithJSON(w, http.StatusBadRequest, LikeResponse{Success: false, Message: "Cannot like yourself"})
 		return
 	}
+
+	// **** MODIFIED Switch statement ****
 	switch req.ContentType {
-	case migrations.ContentLikeTypeMedia, migrations.ContentLikeTypePromptStory, migrations.ContentLikeTypePromptMytype, migrations.ContentLikeTypePromptGettingpersonal, migrations.ContentLikeTypePromptDatevibes, migrations.ContentLikeTypeAudioPrompt:
+	case migrations.ContentLikeTypeMedia,
+		migrations.ContentLikeTypePromptStory,
+		migrations.ContentLikeTypePromptMytype,
+		migrations.ContentLikeTypePromptGettingpersonal,
+		migrations.ContentLikeTypePromptDatevibes,
+		migrations.ContentLikeTypeAudioPrompt: // Added AudioPrompt here
+		// Valid type, continue
 	default:
 		utils.RespondWithJSON(w, http.StatusBadRequest, LikeResponse{Success: false, Message: "Invalid content_type specified"})
 		return
 	}
+	// **** END MODIFIED Switch statement ****
+
 	if req.ContentIdentifier == "" {
 		utils.RespondWithJSON(w, http.StatusBadRequest, LikeResponse{Success: false, Message: "content_identifier is required"})
 		return
@@ -116,6 +128,7 @@ func LikeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// --- Content Existence/Index Validation (Go Code) ---
+	// This function now needs to handle ContentLikeTypeAudioPrompt
 	contentValid, validationErr := validateContentInput(ctx, queries, req.LikedUserID, req.ContentType, req.ContentIdentifier)
 	if validationErr != nil {
 		log.Printf("ERROR: LikeHandler: Error validating content input for user %d liking %d: %v", likerUserID, req.LikedUserID, validationErr)
@@ -203,7 +216,7 @@ func handleRoseLike(ctx context.Context, queries *migrations.Queries, pool *pgxp
 
 	_, err = qtx.DecrementUserConsumable(ctx, migrations.DecrementUserConsumableParams{UserID: params.LikerUserID, ConsumableType: migrations.PremiumFeatureTypeRose})
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, pgx.ErrNoRows) { // Could happen if quantity check was racy, though unlikely with transaction
 			return ErrInsufficientConsumables
 		}
 		return fmt.Errorf("failed to use rose: %w", err)
@@ -212,10 +225,10 @@ func handleRoseLike(ctx context.Context, queries *migrations.Queries, pool *pgxp
 	// *** Call AddContentLike and handle pgx.ErrNoRows for conflict ***
 	_, err = qtx.AddContentLike(ctx, params)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) { // Check for no rows when conflict happens
+		if errors.Is(err, pgx.ErrNoRows) { // Check for no rows when conflict happens and AddContentLike returns nothing
 			log.Printf("WARN: handleRoseLike: Like for item already exists (Conflict Triggered): User=%d -> User=%d, Type=%s, ID=%s", params.LikerUserID, params.LikedUserID, params.ContentType, params.ContentIdentifier)
 			// Conflict is not an application error in this case, treat as success
-			err = nil // Clear error
+			err = nil // Clear error so commit proceeds
 		} else {
 			// Other DB errors
 			return fmt.Errorf("failed to record like: %w", err)
@@ -238,61 +251,52 @@ func handleStandardLike(ctx context.Context, queries *migrations.Queries, params
 		return fmt.Errorf("db error checking subscription: %w", err)
 	}
 
-	if hasUnlimitedLikes {
-		log.Printf("INFO: Processing standard like (unlimited): User=%d -> User=%d", params.LikerUserID, params.LikedUserID)
-		// *** Call AddContentLike and handle pgx.ErrNoRows for conflict ***
-		_, err = queries.AddContentLike(ctx, params)
+	if !hasUnlimitedLikes {
+		// Check limit only if user doesn't have unlimited likes
+		log.Printf("INFO: Checking daily like limit for User=%d", params.LikerUserID)
+		count, err := queries.CountRecentStandardLikes(ctx, params.LikerUserID)
 		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) { // Check for no rows when conflict happens
-				log.Printf("WARN: handleStandardLike (unlimited): Like for item already exists (Conflict Triggered): User=%d -> User=%d, Type=%s, ID=%s", params.LikerUserID, params.LikedUserID, params.ContentType, params.ContentIdentifier)
-				err = nil // Clear error
-			} else {
-				return fmt.Errorf("failed to record like: %w", err)
-			}
+			return fmt.Errorf("db error counting likes: %w", err)
 		}
-		// If err is nil (insert succeeded or conflict handled), log success
-		if err == nil {
-			log.Printf("INFO: Standard like (unlimited) processed: User=%d -> User=%d, Content=%s:%s", params.LikerUserID, params.LikedUserID, params.ContentType, params.ContentIdentifier)
+		if count >= dailyStandardLikeLimit {
+			log.Printf("WARN: Daily like limit reached for User=%d (%d/%d)", params.LikerUserID, count, dailyStandardLikeLimit)
+			return ErrLikeLimitReached
 		}
-		return err // Return nil if successful or conflict occurred, or the actual error otherwise
+		log.Printf("INFO: Processing standard like (limited %d/%d): User=%d -> User=%d", count, dailyStandardLikeLimit, params.LikerUserID, params.LikedUserID)
+	} else {
+		log.Printf("INFO: Processing standard like (unlimited): User=%d -> User=%d", params.LikerUserID, params.LikedUserID)
 	}
 
-	log.Printf("INFO: Checking daily like limit for User=%d", params.LikerUserID)
-	count, err := queries.CountRecentStandardLikes(ctx, params.LikerUserID)
-	if err != nil {
-		return fmt.Errorf("db error counting likes: %w", err)
-	}
-	if count >= dailyStandardLikeLimit {
-		log.Printf("WARN: Daily like limit reached for User=%d (%d/%d)", params.LikerUserID, count, dailyStandardLikeLimit)
-		return ErrLikeLimitReached
-	}
-
-	log.Printf("INFO: Processing standard like (limited %d/%d): User=%d -> User=%d", count, dailyStandardLikeLimit, params.LikerUserID, params.LikedUserID)
 	// *** Call AddContentLike and handle pgx.ErrNoRows for conflict ***
 	_, err = queries.AddContentLike(ctx, params)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) { // Check for no rows when conflict happens
-			log.Printf("WARN: handleStandardLike (limited): Like for item already exists (Conflict Triggered): User=%d -> User=%d, Type=%s, ID=%s", params.LikerUserID, params.LikedUserID, params.ContentType, params.ContentIdentifier)
-			err = nil // Clear error
+		if errors.Is(err, pgx.ErrNoRows) { // Check for no rows when conflict happens and AddContentLike returns nothing
+			log.Printf("WARN: handleStandardLike: Like for item already exists (Conflict Triggered): User=%d -> User=%d, Type=%s, ID=%s", params.LikerUserID, params.LikedUserID, params.ContentType, params.ContentIdentifier)
+			// Conflict is not an application error in this case, treat as success
+			err = nil // Clear error so the function returns nil
 		} else {
+			// Other DB errors
 			return fmt.Errorf("failed to record like: %w", err)
 		}
 	}
 	// If err is nil (insert succeeded or conflict handled), log success
 	if err == nil {
-		log.Printf("INFO: Standard like (limited) processed: User=%d -> User=%d, Content=%s:%s", params.LikerUserID, params.LikedUserID, params.ContentType, params.ContentIdentifier)
+		log.Printf("INFO: Standard like processed: User=%d -> User=%d, Content=%s:%s", params.LikerUserID, params.LikedUserID, params.ContentType, params.ContentIdentifier)
 	}
 	return err // Return nil if successful or conflict occurred, or the actual error otherwise
 }
 
-// validateContentInput defined...
+// **** MODIFIED function to validate audio prompts ****
+// validateContentInput checks if the target content exists and is valid for liking.
 func validateContentInput(ctx context.Context, queries *migrations.Queries, likedUserID int32, contentType migrations.ContentLikeType, contentIdentifier string) (bool, error) {
 	log.Printf("DEBUG: Validating content: User=%d, Type=%s, Identifier=%s", likedUserID, contentType, contentIdentifier)
 	likedUser, err := queries.GetUserByID(ctx, likedUserID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			// Liked user doesn't exist
 			return false, nil
 		}
+		// Other error fetching user
 		return false, fmt.Errorf("failed to fetch liked user %d: %w", likedUserID, err)
 	}
 
@@ -301,34 +305,57 @@ func validateContentInput(ctx context.Context, queries *migrations.Queries, like
 		index, err := strconv.Atoi(contentIdentifier)
 		if err != nil {
 			log.Printf("WARN: Invalid media index '%s' for user %d: %v", contentIdentifier, likedUserID, err)
-			return false, nil
+			return false, nil // Invalid identifier format
 		}
+		// Check if index is within bounds of the media URLs array
 		isValidIndex := index >= 0 && index < len(likedUser.MediaUrls)
 		if !isValidIndex {
 			log.Printf("WARN: Media index %d out of bounds for user %d (has %d media)", index, likedUserID, len(likedUser.MediaUrls))
 		}
 		return isValidIndex, nil
+
+	// **** ADDED Case for Audio Prompt ****
 	case migrations.ContentLikeTypeAudioPrompt:
-		isValid := contentIdentifier == "0" && likedUser.AudioPromptQuestion.Valid && likedUser.AudioPromptAnswer.Valid && likedUser.AudioPromptAnswer.String != ""
+		// Assuming there's only one audio prompt per user, identified by "0"
+		// Check if the identifier is "0" AND the user has a valid audio prompt question AND answer URL
+		isValid := contentIdentifier == "0" &&
+			likedUser.AudioPromptQuestion.Valid &&
+			likedUser.AudioPromptAnswer.Valid &&
+			likedUser.AudioPromptAnswer.String != "" // Ensure URL is not empty
+
 		if !isValid {
-			log.Printf("WARN: Invalid audio prompt like for user %d: Identifier='%s', AudioValid=%t", likedUserID, contentIdentifier, likedUser.AudioPromptQuestion.Valid)
+			log.Printf("WARN: Invalid audio prompt like for user %d: Identifier='%s', AudioQValid=%t, AudioAValid=%t, AudioAEmpty=%t",
+				likedUserID,
+				contentIdentifier,
+				likedUser.AudioPromptQuestion.Valid,
+				likedUser.AudioPromptAnswer.Valid,
+				likedUser.AudioPromptAnswer.String == "")
 		}
 		return isValid, nil
+	// **** END ADDED Case ****
+
 	case migrations.ContentLikeTypePromptStory:
 		prompts, err := queries.GetUserStoryTimePrompts(ctx, likedUserID)
 		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return false, nil
+			}
 			return false, fmt.Errorf("db error fetching story prompts: %w", err)
 		}
 		for _, p := range prompts {
 			if string(p.Question) == contentIdentifier {
-				return true, nil
+				return true, nil // Found matching prompt
 			}
 		}
 		log.Printf("WARN: Story prompt '%s' not found for user %d", contentIdentifier, likedUserID)
-		return false, nil
+		return false, nil // Prompt not found
+
 	case migrations.ContentLikeTypePromptMytype:
 		prompts, err := queries.GetUserMyTypePrompts(ctx, likedUserID)
 		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return false, nil
+			}
 			return false, fmt.Errorf("db error fetching mytype prompts: %w", err)
 		}
 		for _, p := range prompts {
@@ -338,9 +365,13 @@ func validateContentInput(ctx context.Context, queries *migrations.Queries, like
 		}
 		log.Printf("WARN: MyType prompt '%s' not found for user %d", contentIdentifier, likedUserID)
 		return false, nil
+
 	case migrations.ContentLikeTypePromptGettingpersonal:
 		prompts, err := queries.GetUserGettingPersonalPrompts(ctx, likedUserID)
 		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return false, nil
+			}
 			return false, fmt.Errorf("db error fetching gettingpersonal prompts: %w", err)
 		}
 		for _, p := range prompts {
@@ -350,9 +381,13 @@ func validateContentInput(ctx context.Context, queries *migrations.Queries, like
 		}
 		log.Printf("WARN: GettingPersonal prompt '%s' not found for user %d", contentIdentifier, likedUserID)
 		return false, nil
+
 	case migrations.ContentLikeTypePromptDatevibes:
 		prompts, err := queries.GetUserDateVibesPrompts(ctx, likedUserID)
 		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return false, nil
+			}
 			return false, fmt.Errorf("db error fetching datevibes prompts: %w", err)
 		}
 		for _, p := range prompts {
@@ -362,8 +397,12 @@ func validateContentInput(ctx context.Context, queries *migrations.Queries, like
 		}
 		log.Printf("WARN: DateVibes prompt '%s' not found for user %d", contentIdentifier, likedUserID)
 		return false, nil
+
 	default:
+		// Should have been caught earlier, but good to have a fallback
 		log.Printf("ERROR: Unknown content type in validation: %s", contentType)
 		return false, fmt.Errorf("unknown content_type for validation: %s", contentType)
 	}
 }
+
+// **** END MODIFIED function ****
