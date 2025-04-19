@@ -796,7 +796,7 @@ type Like struct {
 	LikedUserID int32
 	// The type of content that was liked (media, prompt, audio).
 	ContentType ContentLikeType
-	// Identifier for the specific content liked (e.g., media URL, prompt question).
+	// Identifier for the specific content liked (e.g., media URL index, prompt question, "0" for audio).
 	ContentIdentifier string
 	// Optional comment sent with the like (max 140 chars).
 	Comment pgtype.Text

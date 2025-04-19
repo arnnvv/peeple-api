@@ -97,13 +97,14 @@ COMMENT ON TYPE premium_feature_type IS 'Defines the types of premium features a
 CREATE TYPE like_interaction_type AS ENUM ('standard', 'rose');
 COMMENT ON TYPE like_interaction_type IS 'Distinguishes standard likes from premium interactions like Roses.';
 
+-- **** MODIFIED ENUM ****
 CREATE TYPE content_like_type AS ENUM (
     'media',
     'prompt_story',
     'prompt_mytype',
     'prompt_gettingpersonal',
     'prompt_datevibes',
-    'audio_prompt'
+    'audio_prompt' -- Added audio prompt type
 );
 COMMENT ON TYPE content_like_type IS 'Specifies the type of profile content being liked.';
 
@@ -249,12 +250,12 @@ CREATE TABLE dislikes (
 COMMENT ON TABLE dislikes IS 'Stores records of users disliking other users.';
 CREATE INDEX idx_dislikes_disliked_user ON dislikes (disliked_user_id);
 
--- Likes Table (Keep as it was)
+-- Likes Table (Keep as it was, uses modified content_like_type)
 CREATE TABLE likes (
     id SERIAL PRIMARY KEY,
     liker_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     liked_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    content_type content_like_type NOT NULL DEFAULT 'media',
+    content_type content_like_type NOT NULL DEFAULT 'media', -- Uses the modified ENUM
     content_identifier TEXT NOT NULL DEFAULT '0',
     comment TEXT CHECK (length(comment) <= 140),
     interaction_type like_interaction_type NOT NULL DEFAULT 'standard',
@@ -263,7 +264,7 @@ CREATE TABLE likes (
 );
 COMMENT ON TABLE likes IS 'Stores records of users liking specific content items on other users profiles, optionally with a comment.';
 COMMENT ON COLUMN likes.content_type IS 'The type of content that was liked (media, prompt, audio).';
-COMMENT ON COLUMN likes.content_identifier IS 'Identifier for the specific content liked (e.g., media URL, prompt question).';
+COMMENT ON COLUMN likes.content_identifier IS 'Identifier for the specific content liked (e.g., media URL index, prompt question, "0" for audio).';
 COMMENT ON COLUMN likes.comment IS 'Optional comment sent with the like (max 140 chars).';
 COMMENT ON COLUMN likes.interaction_type IS 'Distinguishes standard likes from premium interactions like Roses.';
 CREATE INDEX idx_likes_liked_user ON likes (liked_user_id);
