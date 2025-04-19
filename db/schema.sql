@@ -104,7 +104,8 @@ CREATE TYPE content_like_type AS ENUM (
     'prompt_mytype',
     'prompt_gettingpersonal',
     'prompt_datevibes',
-    'audio_prompt' -- Added audio prompt type
+    'audio_prompt', -- Added audio prompt type
+    'profile'
 );
 COMMENT ON TYPE content_like_type IS 'Specifies the type of profile content being liked.';
 
