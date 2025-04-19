@@ -53,6 +53,7 @@ func main() {
 	http.HandleFunc("/api/likes/received", token.AuthMiddleware(handlers.GetWhoLikedYouHandler))
 
 	http.HandleFunc("/chat", token.AuthMiddleware(handlers.ChatHandler))
+	http.HandleFunc("/api/matches", token.AuthMiddleware(handlers.GetMatchesHandler))
 
 	http.HandleFunc("/api/set-admin", token.AdminAuthMiddleware(handlers.SetAdminHandler))
 	http.HandleFunc("/api/admin/verifications", token.AdminAuthMiddleware(handlers.GetPendingVerificationsHandler))
