@@ -39,8 +39,8 @@ type LikeResponse struct {
 func LikeHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	ctx := r.Context()
-	queries := db.GetDB()
-	pool := db.GetPool()
+	queries, _ := db.GetDB()
+	pool, _ := db.GetPool()
 
 	if queries == nil || pool == nil {
 		log.Println("ERROR: LikeHandler: Database connection not available.")

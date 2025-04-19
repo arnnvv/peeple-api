@@ -60,13 +60,13 @@ func CreateProfile(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("\n=== Starting Profile Creation/Update (Partial) ===")
 	defer fmt.Println("=== End Profile Creation/Update (Partial) ===")
 
-	queries := db.GetDB()
-	if queries == nil {
+	queries, err := db.GetDB()
+	if err != nil {
 		respondError(w, "Database connection is not available", http.StatusInternalServerError)
 		return
 	}
-	pool := db.GetPool()
-	if pool == nil {
+	pool, er := db.GetPool()
+	if er != nil {
 		respondError(w, "Database connection pool is not available for transaction", http.StatusInternalServerError)
 		return
 	}

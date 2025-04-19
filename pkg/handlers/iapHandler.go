@@ -55,7 +55,7 @@ func verifyReceipt(platform, receiptData, productID, transactionID string) (bool
 func VerifyPurchaseHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	ctx := r.Context()
-	queries := db.GetDB()
+	queries, _ := db.GetDB()
 	if queries == nil {
 		log.Println("ERROR: VerifyPurchaseHandler: Database connection not available.")
 		utils.RespondWithJSON(w, http.StatusInternalServerError, VerifyPurchaseResponse{Success: false, Message: "Database connection error"})

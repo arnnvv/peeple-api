@@ -18,7 +18,7 @@ type VerificationActionRequest struct {
 func UpdateVerificationStatusHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	ctx := r.Context()
-	queries := db.GetDB()
+	queries, _ := db.GetDB()
 
 	// claims, ok := ctx.Value(token.ClaimsContextKey).(*token.Claims)
 	// if !ok || claims == nil || claims.Role != string(migrations.UserRoleAdmin) {

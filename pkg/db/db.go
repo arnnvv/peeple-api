@@ -2,8 +2,8 @@ package db
 
 import (
 	"context"
+	"errors"
 	"log"
-	"os"
 	"sync"
 	"time"
 
@@ -13,105 +13,65 @@ import (
 
 var (
 	pool    *pgxpool.Pool
-	poolMu  sync.Mutex
+	once    sync.Once
+	initErr error
 	queries *migrations.Queries
 )
 
-// InitDB initializes the database connection pool.
-func InitDB() error {
-	poolMu.Lock()
-	defer poolMu.Unlock()
+func InitDB(dbURL string) error {
+	once.Do(func() {
+		cfg, err := pgxpool.ParseConfig(dbURL)
+		if err != nil {
+			initErr = err
+			return
+		}
 
-	if pool != nil {
-		log.Println("Database connection pool already initialized.")
-		return nil // Already initialized
-	}
+		cfg.MaxConns = 50
+		cfg.MinConns = 5
+		cfg.MaxConnLifetime = time.Hour
+		cfg.MaxConnIdleTime = 5 * time.Minute
+		cfg.ConnConfig.ConnectTimeout = 5 * time.Second
 
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		log.Fatal("DATABASE_URL environment variable is not set")
-	}
+		pool, err = pgxpool.NewWithConfig(context.Background(), cfg)
+		if err != nil {
+			initErr = err
+			return
+		}
 
-	var err error
-	dbConfig, err := pgxpool.ParseConfig(dbURL)
-	if err != nil {
-		log.Printf("Error parsing DATABASE_URL: %v", err)
-		return err
-	}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err = pool.Ping(ctx); err != nil {
+			pool.Close()
+			initErr = err
+			return
+		}
 
-	// Configure pool settings (adjust as needed)
-	dbConfig.MaxConns = 50
-	dbConfig.MinConns = 5 // Can start lower
-	dbConfig.MaxConnLifetime = time.Hour
-	dbConfig.MaxConnIdleTime = 5 * time.Minute // Reduce idle time
-	dbConfig.HealthCheckPeriod = 1 * time.Minute
-	dbConfig.ConnConfig.ConnectTimeout = 5 * time.Second
+		queries = migrations.New(pool)
+		log.Println("Database pool initialized successfully")
+	})
 
-	log.Println("Attempting to connect to database...")
-	// Retry logic could be added here if desired
-	newPool, err := pgxpool.NewWithConfig(context.Background(), dbConfig)
-	if err != nil {
-		log.Printf("Unable to create connection pool: %v", err)
-		return err
-	}
-
-	// Ping the database to verify connection
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err = newPool.Ping(ctx); err != nil {
-		newPool.Close() // Close the pool if ping fails
-		log.Printf("Database ping failed after connection: %v", err)
-		return err
-	}
-
-	pool = newPool
-	queries = migrations.New(pool) // Create queries instance
-
-	log.Println("Database connection pool initialized successfully")
-	return nil
+	return initErr
 }
 
-// GetDB returns the queries instance, ensuring the pool is initialized.
-func GetDB() *migrations.Queries {
-	poolMu.Lock()
-	// If pool is nil, InitDB likely failed or hasn't been called.
-	// It's better to let InitDB handle the initialization.
+func GetDB() (*migrations.Queries, error) {
 	if pool == nil {
-		poolMu.Unlock()
-		log.Println("GetDB called but pool is not initialized. Check InitDB call.")
-		// Returning nil forces callers to handle the uninitialized state.
-		// Alternatively, could attempt InitDB here, but it might hide startup issues.
-		return nil
+		return nil, errors.New("database not initialized")
 	}
-	q := queries // Get the current queries instance
-	poolMu.Unlock()
-	return q
+	return queries, nil
 }
 
-// GetPool returns the raw connection pool. Use with caution.
-func GetPool() *pgxpool.Pool {
-	poolMu.Lock()
-	p := pool // Get the current pool instance
-	poolMu.Unlock()
-	// We check if 'p' is nil AFTER unlocking to avoid holding the lock
-	// while potentially calling GetDB() which also locks.
-	if p == nil {
-		log.Println("GetPool called but pool is not initialized. Check InitDB call.")
-		// Attempt to initialize or return nil? Returning nil is safer for now.
-		return nil
+func GetPool() (*pgxpool.Pool, error) {
+	if pool == nil {
+		return nil, errors.New("database pool not initialized")
 	}
-	return p
+	return pool, nil
 }
 
-// CloseDB closes the database connection pool.
 func CloseDB() {
-	poolMu.Lock()
-	defer poolMu.Unlock()
-
 	if pool != nil {
 		pool.Close()
 		pool = nil
 		queries = nil
-		log.Println("Database connection pool closed")
+		log.Println("Database pool closed")
 	}
 }

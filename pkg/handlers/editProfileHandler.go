@@ -97,8 +97,8 @@ func init() {
 
 func EditProfileHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	queries := db.GetDB()
-	pool := db.GetPool()
+	queries, _ := db.GetDB()
+	pool, _ := db.GetPool()
 
 	if queries == nil || pool == nil {
 		utils.RespondWithError(w, http.StatusInternalServerError, "Database connection not available")

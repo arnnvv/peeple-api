@@ -27,7 +27,7 @@ func GetPendingVerificationsHandler(w http.ResponseWriter, r *http.Request) {
 	defer fmt.Println("=== End Get Pending Verifications (sqlc) ===")
 
 	// Get DB Queries object
-	queries := db.GetDB()
+	queries, _ := db.GetDB()
 	if queries == nil {
 		// Use the existing respondError or create one specific to this handler
 		log.Println("[Error] Database pool is not initialized in GetPendingVerificationsHandler")

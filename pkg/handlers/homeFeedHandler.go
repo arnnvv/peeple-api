@@ -66,7 +66,7 @@ type HomeFeedResponse struct {
 func GetHomeFeedHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	ctx := r.Context()
-	queries := db.GetDB()
+	queries, _ := db.GetDB()
 
 	if r.Method != http.MethodGet {
 		utils.RespondWithJSON(w, http.StatusMethodNotAllowed, HomeFeedResponse{

@@ -23,7 +23,7 @@ type DislikeResponse struct {
 func DislikeHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	ctx := r.Context()
-	queries := db.GetDB()
+	queries, _ := db.GetDB()
 
 	if r.Method != http.MethodPost {
 		utils.RespondWithJSON(w, http.StatusMethodNotAllowed, DislikeResponse{Success: false, Message: "Method Not Allowed: Use POST"})

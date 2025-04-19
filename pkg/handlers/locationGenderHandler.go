@@ -42,7 +42,7 @@ type UpdateLocationGenderResponse struct {
 // ADDED: Also sets default filters upon successful update.
 func UpdateLocationGenderHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	queries := db.GetDB()
+	queries, _ := db.GetDB()
 	if queries == nil {
 		utils.RespondWithError(w, http.StatusInternalServerError, "Database connection not available")
 		return
