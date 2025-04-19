@@ -378,3 +378,39 @@ INSERT INTO reports (
     $1, $2, $3
 )
 RETURNING id, reporter_user_id, reported_user_id, reason, created_at;
+
+-- name: GetMatchesWithLastMessage :many
+-- Fetches users mutually liked by the requesting user, along with the last chat message between them.
+SELECT
+    target_user.id AS matched_user_id,
+    target_user.name AS matched_user_name,
+    target_user.last_name AS matched_user_last_name,
+    target_user.media_urls AS matched_user_media_urls,
+    last_msg.message_text AS last_message_text,
+    last_msg.sent_at AS last_message_sent_at,
+    last_msg.sender_user_id AS last_message_sender_id
+FROM
+    likes l1 -- Likes initiated by the requesting user
+JOIN
+    users target_user ON l1.liked_user_id = target_user.id
+JOIN
+    likes l2 ON l1.liked_user_id = l2.liker_user_id AND l1.liker_user_id = l2.liked_user_id -- Mutual like condition
+LEFT JOIN LATERAL (
+    SELECT
+        cm.message_text,
+        cm.sent_at,
+        cm.sender_user_id
+    FROM
+        chat_messages cm
+    WHERE
+        (cm.sender_user_id = l1.liker_user_id AND cm.recipient_user_id = l1.liked_user_id)
+        OR (cm.sender_user_id = l1.liked_user_id AND cm.recipient_user_id = l1.liker_user_id)
+    ORDER BY
+        cm.sent_at DESC
+    LIMIT 1
+) last_msg ON true -- Join always, LEFT JOIN handles cases with no messages
+WHERE
+    l1.liker_user_id = $1 -- The requesting user ID
+ORDER BY
+    last_msg.sent_at DESC NULLS LAST, -- Order matches by most recent message activity
+    target_user.id;
