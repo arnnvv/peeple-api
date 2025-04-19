@@ -1,4 +1,3 @@
-// FILE: pkg/handlers/checkauthstatus.go
 package handlers
 
 import (
@@ -54,8 +53,6 @@ func CheckAuthStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check onboarding steps
-	// Step 1: Check if Gender is set
 	if !user.Gender.Valid || (user.Gender.GenderEnum != migrations.GenderEnumMan && user.Gender.GenderEnum != migrations.GenderEnumWoman) {
 		respondAuthStatus(w, http.StatusOK, AuthStatusResponse{
 			Success: true,
@@ -65,7 +62,6 @@ func CheckAuthStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 2: Check if Name is set (assuming Gender is already set)
 	if !user.Name.Valid || user.Name.String == "" {
 		respondAuthStatus(w, http.StatusOK, AuthStatusResponse{
 			Success: true,
@@ -75,7 +71,6 @@ func CheckAuthStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If both Gender and Name are set, user is considered fully onboarded
 	respondAuthStatus(w, http.StatusOK, AuthStatusResponse{
 		Success: true,
 		Status:  "home",
@@ -83,7 +78,6 @@ func CheckAuthStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Keep the helper function
 func respondAuthStatus(w http.ResponseWriter, code int, payload AuthStatusResponse) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)

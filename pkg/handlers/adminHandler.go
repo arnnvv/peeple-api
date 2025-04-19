@@ -1,4 +1,3 @@
-// FILE: pkg/handlers/adminHandler.go (Resolved)
 package handlers
 
 import (
@@ -10,11 +9,10 @@ import (
 
 	"github.com/arnnvv/peeple-api/migrations"
 	"github.com/arnnvv/peeple-api/pkg/db"
-	"github.com/arnnvv/peeple-api/pkg/utils" // Import utils
-	"github.com/jackc/pgx/v5"                // Import pgx
+	"github.com/arnnvv/peeple-api/pkg/utils"
+	"github.com/jackc/pgx/v5"
 )
 
-// Changed request to use Email
 type SetAdminRequest struct {
 	Email   string `json:"email"`
 	IsAdmin bool   `json:"is_admin"`
@@ -68,7 +66,7 @@ func SetAdminHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if user.Role == targetRole {
-		utils.RespondWithJSON(w, http.StatusOK, SetAdminResponse{ // Kept utils call
+		utils.RespondWithJSON(w, http.StatusOK, SetAdminResponse{
 			Success: true,
 			Message: "User role is already set to the desired value",
 			UserID:  user.ID,
@@ -89,7 +87,7 @@ func SetAdminHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	utils.RespondWithJSON(w, http.StatusOK, SetAdminResponse{ // Kept utils call
+	utils.RespondWithJSON(w, http.StatusOK, SetAdminResponse{
 		Success: true,
 		Message: "User role updated successfully",
 		UserID:  updatedUser.ID,

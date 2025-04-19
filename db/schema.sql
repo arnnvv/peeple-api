@@ -97,14 +97,14 @@ COMMENT ON TYPE premium_feature_type IS 'Defines the types of premium features a
 CREATE TYPE like_interaction_type AS ENUM ('standard', 'rose');
 COMMENT ON TYPE like_interaction_type IS 'Distinguishes standard likes from premium interactions like Roses.';
 
--- **** MODIFIED ENUM ****
 CREATE TYPE content_like_type AS ENUM (
     'media',
     'prompt_story',
     'prompt_mytype',
     'prompt_gettingpersonal',
     'prompt_datevibes',
-    'audio_prompt' -- Added audio prompt type
+    'audio_prompt',
+    'profile'
 );
 COMMENT ON TYPE content_like_type IS 'Specifies the type of profile content being liked.';
 
