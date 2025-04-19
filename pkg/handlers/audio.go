@@ -177,7 +177,7 @@ func GenerateAudioPresignedURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	queries := db.GetDB()
+	queries, _ := db.GetDB()
 
 	err = handleDatabaseOperations(r.Context(), queries, int32(userID), permanentObjectURL, audioPromptEnum)
 	if err != nil {

@@ -29,7 +29,7 @@ type GetMatchesResponse struct {
 func GetMatchesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	ctx := r.Context()
-	queries := db.GetDB()
+	queries, _ := db.GetDB()
 	if queries == nil {
 		log.Println("ERROR: GetMatchesHandler: Database connection not available.")
 		utils.RespondWithJSON(w, http.StatusInternalServerError, GetMatchesResponse{Success: false, Message: "Database connection error", Matches: []MatchInfo{}})

@@ -41,8 +41,8 @@ func parseReportReason(reasonStr string) (migrations.ReportReason, error) {
 func ReportHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	ctx := r.Context()
-	queries := db.GetDB()
-	if queries == nil {
+	queries, er := db.GetDB()
+	if er != nil {
 		utils.RespondWithError(w, http.StatusInternalServerError, "Database connection not available")
 		return
 	}

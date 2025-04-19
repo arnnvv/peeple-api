@@ -1,7 +1,6 @@
 package token
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -36,19 +35,23 @@ func AdminAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		q := db.GetDB()
+		q, err := db.GetDB()
+		if err != nil {
+			log.Printf("AdminAuthMiddleware: Failed to get database connection: %v", err)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(errInternalServer)
+			return
+		}
 
-		var user migrations.User
-		var err error
-
-		user, err = q.GetUserByID(context.Background(), int32(claims.UserID))
+		user, err := q.GetUserByID(r.Context(), int32(claims.UserID))
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			if errors.Is(err, sql.ErrNoRows) {
 				w.WriteHeader(http.StatusNotFound)
 				json.NewEncoder(w).Encode(errUserNotFound)
 			} else {
-				log.Printf("AdminAuthMiddleware: Error fetching user %d: %v\n", claims.UserID, err)
+				log.Printf("AdminAuthMiddleware: Error fetching user %d: %v", claims.UserID, err)
 				w.WriteHeader(http.StatusInternalServerError)
 				json.NewEncoder(w).Encode(errInternalServer)
 			}

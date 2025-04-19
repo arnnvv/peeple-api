@@ -72,7 +72,7 @@ func GoogleAuthHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	ctx := r.Context()
-	queries := db.GetDB()
+	queries, _ := db.GetDB()
 	if queries == nil {
 		log.Println("ERROR: GoogleAuthHandler: Database connection not available.")
 		utils.RespondWithJSON(w, http.StatusInternalServerError, GoogleAuthResponse{Success: false, Message: "Database connection error"})

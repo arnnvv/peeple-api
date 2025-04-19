@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/arnnvv/peeple-api/pkg/db"
@@ -12,71 +15,128 @@ import (
 	"github.com/arnnvv/peeple-api/pkg/token"
 )
 
+type Config struct {
+	Port          string
+	DatabaseURL   string
+	ServerTimeout struct {
+		ReadHeader time.Duration
+		Write      time.Duration
+		Idle       time.Duration
+	}
+}
+
+func loadConfig() Config {
+	cfg := Config{
+		Port:        getEnv("PORT", ""),
+		DatabaseURL: getEnv("DATABASE_URL", ""),
+		ServerTimeout: struct {
+			ReadHeader time.Duration
+			Write      time.Duration
+			Idle       time.Duration
+		}{
+			ReadHeader: 5 * time.Second,
+			Write:      10 * time.Second,
+			Idle:       60 * time.Second,
+		},
+	}
+	return cfg
+}
+
+func getEnv(key, defaultValue string) string {
+	if value, exists := os.LookupEnv(key); exists {
+		return value
+	}
+	return defaultValue
+}
+
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
-	port := os.Getenv("PORT")
+	cfg := loadConfig()
 
-	if err := db.InitDB(); err != nil {
+	if err := db.InitDB(cfg.DatabaseURL); err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 	defer db.CloseDB()
 
 	server := &http.Server{
-		Addr:              ":" + port,
-		ReadHeaderTimeout: 5 * time.Second,
-		WriteTimeout:      10 * time.Second,
-		IdleTimeout:       60 * time.Second,
+		Addr:              ":" + cfg.Port,
+		ReadHeaderTimeout: cfg.ServerTimeout.ReadHeader,
+		WriteTimeout:      cfg.ServerTimeout.Write,
+		IdleTimeout:       cfg.ServerTimeout.Idle,
+		Handler:           setupRoutes(),
 	}
 
-	http.HandleFunc("/api/auth/google/verify", handlers.GoogleAuthHandler)
-	http.HandleFunc("/api/auth-status", token.AuthMiddleware(handlers.CheckAuthStatus))
-	http.HandleFunc("/token", token.GenerateTokenHandler) // Keep for testing/debug if needed
+	serverCtx, serverStopCtx := context.WithCancel(context.Background())
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
-	http.HandleFunc("/", token.AuthMiddleware(handlers.ProtectedHandler)) // Basic protected route
+	go func() {
+		<-sig
+		log.Println("Shutdown signal received")
 
-	// --- Profile & Onboarding ---
-	http.HandleFunc("/api/profile", token.AuthMiddleware(handlers.CreateProfile))                               // Onboarding Step 2 (details)
-	http.HandleFunc("/api/profile/location-gender", token.AuthMiddleware(handlers.UpdateLocationGenderHandler)) // Onboarding Step 1
-	http.HandleFunc("/get-profile", token.AuthMiddleware(handlers.ProfileHandler))                              // Fetch own profile
-	http.HandleFunc("/api/profile/edit", token.AuthMiddleware(handlers.EditProfileHandler))                     // Edit existing profile
+		shutdownCtx, cancel := context.WithTimeout(serverCtx, 30*time.Second)
+		defer cancel()
 
-	// --- Media Uploads ---
-	http.HandleFunc("/upload", token.AuthMiddleware(handlers.GeneratePresignedURLs))            // Original upload, saves to DB
-	http.HandleFunc("/audio", token.AuthMiddleware(handlers.GenerateAudioPresignedURL))         // Audio upload, saves to DB
-	http.HandleFunc("/verify", token.AuthMiddleware(handlers.GenerateVerificationPresignedURL)) // Verification image upload, saves to DB
-	// *** RENAMED ROUTE AND HANDLER HERE ***
-	http.HandleFunc("/api/edit-presigned-urls", token.AuthMiddleware(handlers.GenerateEditPresignedURLs)) // Generate URLs for editing, DOES NOT save to DB
+		go func() {
+			<-shutdownCtx.Done()
+			if shutdownCtx.Err() == context.DeadlineExceeded {
+				log.Fatal("Graceful shutdown timed out.. forcing exit")
+			}
+		}()
 
-	// --- Feed & Matching ---
-	http.HandleFunc("/api/filters", token.AuthMiddleware(handlers.ApplyFiltersHandler))
-	http.HandleFunc("/api/get-filters", token.AuthMiddleware(handlers.GetFiltersHandler))
-	http.HandleFunc("/api/app-opened", token.AuthMiddleware(handlers.LogAppOpenHandler))
-	http.HandleFunc("/api/homefeed", token.AuthMiddleware(handlers.GetHomeFeedHandler))
-	http.HandleFunc("/api/quickfeed", token.AuthMiddleware(handlers.GetQuickFeedHandler))
-	http.HandleFunc("/api/like", token.AuthMiddleware(handlers.LikeHandler))
-	http.HandleFunc("/api/dislike", token.AuthMiddleware(handlers.DislikeHandler))
-	http.HandleFunc("/api/unmatch", token.AuthMiddleware(handlers.UnmatchHandler))
-	http.HandleFunc("/api/report", token.AuthMiddleware(handlers.ReportHandler))
-	http.HandleFunc("/api/likes/received", token.AuthMiddleware(handlers.GetWhoLikedYouHandler))
-	http.HandleFunc("/api/liker-profile/", token.AuthMiddleware(handlers.GetLikerProfileHandler)) // Note trailing slash for path matching
-	http.HandleFunc("/api/matches", token.AuthMiddleware(handlers.GetMatchesHandler))
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Fatalf("Server shutdown error: %v", err)
+		}
+		serverStopCtx()
+	}()
 
-	// --- In-App Purchases ---
-	http.HandleFunc("/api/iap/verify", token.AuthMiddleware(handlers.VerifyPurchaseHandler))
-
-	// --- Chat ---
-	http.HandleFunc("/chat", token.AuthMiddleware(handlers.ChatHandler)) // WebSocket
-
-	// --- Admin ---
-	http.HandleFunc("/api/set-admin", token.AdminAuthMiddleware(handlers.SetAdminHandler))
-	http.HandleFunc("/api/admin/verifications", token.AdminAuthMiddleware(handlers.GetPendingVerificationsHandler))
-	http.HandleFunc("/api/admin/verify", token.AdminAuthMiddleware(handlers.UpdateVerificationStatusHandler))
-
-	// --- Test ---
-	http.HandleFunc("/test", handlers.TestHandler)
-
-	log.Printf("Server is running on http://localhost:%s\n", port)
+	log.Printf("Server starting on :%s", cfg.Port)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatal(err)
+		log.Fatalf("Server failed: %v", err)
 	}
+
+	<-serverCtx.Done()
+	log.Println("Server stopped")
+}
+
+func setupRoutes() *http.ServeMux {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/api/auth/google/verify", handlers.GoogleAuthHandler)
+	mux.HandleFunc("/token", token.GenerateTokenHandler)
+	mux.HandleFunc("/test", handlers.TestHandler)
+
+	authMiddleware := token.AuthMiddleware
+	mux.HandleFunc("/api/auth-status", authMiddleware(handlers.CheckAuthStatus))
+	mux.HandleFunc("/api/profile", authMiddleware(handlers.CreateProfile))
+	mux.HandleFunc("/api/profile/location-gender", authMiddleware(handlers.UpdateLocationGenderHandler))
+	mux.HandleFunc("/get-profile", authMiddleware(handlers.ProfileHandler))
+	mux.HandleFunc("/api/profile/edit", authMiddleware(handlers.EditProfileHandler))
+	mux.HandleFunc("/upload", authMiddleware(handlers.GeneratePresignedURLs))
+	mux.HandleFunc("/audio", authMiddleware(handlers.GenerateAudioPresignedURL))
+	mux.HandleFunc("/verify", authMiddleware(handlers.GenerateVerificationPresignedURL))
+	mux.HandleFunc("/api/edit-presigned-urls", authMiddleware(handlers.GenerateEditPresignedURLs))
+	mux.HandleFunc("/api/filters", authMiddleware(handlers.ApplyFiltersHandler))
+	mux.HandleFunc("/api/get-filters", authMiddleware(handlers.GetFiltersHandler))
+	mux.HandleFunc("/api/app-opened", authMiddleware(handlers.LogAppOpenHandler))
+	mux.HandleFunc("/api/homefeed", authMiddleware(handlers.GetHomeFeedHandler))
+	mux.HandleFunc("/api/quickfeed", authMiddleware(handlers.GetQuickFeedHandler))
+	mux.HandleFunc("/api/like", authMiddleware(handlers.LikeHandler))
+	mux.HandleFunc("/api/dislike", authMiddleware(handlers.DislikeHandler))
+	mux.HandleFunc("/api/unmatch", authMiddleware(handlers.UnmatchHandler))
+	mux.HandleFunc("/api/report", authMiddleware(handlers.ReportHandler))
+	mux.HandleFunc("/api/likes/received", authMiddleware(handlers.GetWhoLikedYouHandler))
+	mux.HandleFunc("/api/liker-profile/", authMiddleware(handlers.GetLikerProfileHandler))
+	mux.HandleFunc("/api/matches", authMiddleware(handlers.GetMatchesHandler))
+	mux.HandleFunc("/api/iap/verify", authMiddleware(handlers.VerifyPurchaseHandler))
+	mux.HandleFunc("/chat", authMiddleware(handlers.ChatHandler))
+
+	adminMiddleware := token.AdminAuthMiddleware
+	mux.HandleFunc("/api/set-admin", adminMiddleware(handlers.SetAdminHandler))
+	mux.HandleFunc("/api/admin/verifications", adminMiddleware(handlers.GetPendingVerificationsHandler))
+	mux.HandleFunc("/api/admin/verify", adminMiddleware(handlers.UpdateVerificationStatusHandler))
+
+	mux.HandleFunc("/", authMiddleware(handlers.ProtectedHandler))
+
+	return mux
 }

@@ -25,7 +25,7 @@ import (
 func GenerateVerificationPresignedURL(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	ctx := r.Context()
-	queries := db.GetDB()
+	queries, _ := db.GetDB()
 
 	authHeader := r.Header.Get("Authorization")
 	targetURL := os.Getenv("TARGET_URL")

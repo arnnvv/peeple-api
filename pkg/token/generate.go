@@ -1,4 +1,3 @@
-// FILE: pkg/token/generate.go
 package token
 
 import (
@@ -8,20 +7,19 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings" // Added for email validation
+	"strings"
 	"sync"
-	// "unicode" // No longer needed for phone validation
 
 	"github.com/arnnvv/peeple-api/migrations"
 	"github.com/arnnvv/peeple-api/pkg/db"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/jackc/pgx/v5" // Import pgx/v5
+	"github.com/jackc/pgx/v5"
 )
 
 type TokenResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
-	Token   string `json:"token,omitempty"` // Changed message to token for clarity
+	Token   string `json:"token,omitempty"`
 }
 
 // ErrorResponse struct (can be shared or redefined if needed)
@@ -98,7 +96,14 @@ func GenerateTokenHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	queries := db.GetDB()
+	queries, err2 := db.GetDB()
+	if err2 != nil {
+		log.Printf("AdminAuthMiddleware: Failed to get database connection: %v", err2)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(errInternalServer)
+		return
+	}
 	if queries == nil {
 		log.Printf("GenerateTokenHandler: Database connection not available")
 		w.WriteHeader(http.StatusInternalServerError)

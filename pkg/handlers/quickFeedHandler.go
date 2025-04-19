@@ -22,8 +22,8 @@ const quickFeedLimit = 2
 
 func GetQuickFeedHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	queries := db.GetDB()
-	if queries == nil {
+	queries, er := db.GetDB()
+	if er != nil {
 		utils.RespondWithError(w, http.StatusInternalServerError, "Database connection not available")
 		return
 	}

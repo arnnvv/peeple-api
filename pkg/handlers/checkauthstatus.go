@@ -35,7 +35,7 @@ func CheckAuthStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := int32(claims.UserID)
-	queries := db.GetDB()
+	queries, _ := db.GetDB()
 	user, err := queries.GetUserByID(r.Context(), userID)
 
 	if err != nil {

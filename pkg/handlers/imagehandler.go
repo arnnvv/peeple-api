@@ -68,7 +68,7 @@ func GeneratePresignedURLs(w http.ResponseWriter, r *http.Request) {
 	userID := int32(claims.UserID)
 	ctx := r.Context()
 
-	queries := db.GetDB()
+	queries, _ := db.GetDB()
 
 	// Verify user exists (good practice)
 	_, err := queries.GetUserByID(ctx, userID)
@@ -206,8 +206,8 @@ func GenerateEditPresignedURLs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := int32(claims.UserID)
-	ctx := r.Context()    // Get context
-	queries := db.GetDB() // Get DB queries instance
+	ctx := r.Context()       // Get context
+	queries, _ := db.GetDB() // Get DB queries instance
 	if queries == nil {
 		log.Println("GenerateEditPresignedURLs: Database connection not available")
 		http.Error(w, "Internal server error", http.StatusInternalServerError)

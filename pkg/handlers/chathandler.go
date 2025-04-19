@@ -41,7 +41,7 @@ type Message struct {
 
 func ChatHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	queries := db.GetDB()
+	queries, _ := db.GetDB()
 	if queries == nil {
 		log.Println("ERROR: ChatHandler: Database connection not available.")
 		// Cannot easily write HTTP error as upgrade might have started

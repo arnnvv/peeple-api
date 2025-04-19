@@ -48,7 +48,7 @@ func SetAdminHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	queries := db.GetDB()
+	queries, _ := db.GetDB()
 	user, err := queries.GetUserByEmail(r.Context(), req.Email)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {

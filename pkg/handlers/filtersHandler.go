@@ -33,7 +33,7 @@ type ApplyFiltersResponse struct {
 func ApplyFiltersHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	ctx := r.Context()
-	queries := db.GetDB()
+	queries, _ := db.GetDB()
 
 	if r.Method != http.MethodPost {
 		utils.RespondWithJSON(w, http.StatusMethodNotAllowed, ApplyFiltersResponse{
