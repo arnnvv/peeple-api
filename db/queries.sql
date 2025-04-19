@@ -390,7 +390,7 @@ SELECT
     last_msg.sent_at AS last_message_sent_at,
     last_msg.sender_user_id AS last_message_sender_id
 FROM
-    likes l1 -- Likes initiated by the requesting user
+    likes l1
 JOIN
     users target_user ON l1.liked_user_id = target_user.id
 JOIN
@@ -408,9 +408,15 @@ LEFT JOIN LATERAL (
     ORDER BY
         cm.sent_at DESC
     LIMIT 1
-) last_msg ON true -- Join always, LEFT JOIN handles cases with no messages
+) last_msg ON true
 WHERE
-    l1.liker_user_id = $1 -- The requesting user ID
+    l1.liker_user_id = $1
 ORDER BY
-    last_msg.sent_at DESC NULLS LAST, -- Order matches by most recent message activity
+    last_msg.sent_at DESC NULLS LAST,
     target_user.id;
+
+-- name: CheckLikeExists :one
+SELECT EXISTS (
+    SELECT 1 FROM likes
+    WHERE liker_user_id = $1 AND liked_user_id = $2
+);
