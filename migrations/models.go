@@ -97,6 +97,7 @@ const (
 	ContentLikeTypePromptGettingpersonal ContentLikeType = "prompt_gettingpersonal"
 	ContentLikeTypePromptDatevibes       ContentLikeType = "prompt_datevibes"
 	ContentLikeTypeAudioPrompt           ContentLikeType = "audio_prompt"
+	ContentLikeTypeProfile               ContentLikeType = "profile"
 )
 
 func (e *ContentLikeType) Scan(src interface{}) error {

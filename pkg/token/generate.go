@@ -68,14 +68,13 @@ func GenerateTokenHandler(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(ErrorResponse{ // Using ErrorResponse for consistency
+		json.NewEncoder(w).Encode(ErrorResponse{
 			Success: false,
 			Message: "Only GET method allowed",
 		})
 		return
 	}
 
-	// Changed query parameter from 'phone' to 'email'
 	email := r.URL.Query().Get("email")
 	if email == "" {
 		w.WriteHeader(http.StatusBadRequest)
@@ -86,7 +85,6 @@ func GenerateTokenHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Basic email format validation (can be enhanced)
 	if !strings.Contains(email, "@") {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(ErrorResponse{
@@ -117,10 +115,8 @@ func GenerateTokenHandler(w http.ResponseWriter, r *http.Request) {
 	var user migrations.User
 	var err error
 
-	// Changed lookup from GetUserByPhone to GetUserByEmail
 	user, err = queries.GetUserByEmail(r.Context(), email)
 	if err != nil {
-		// Adjust error checking for pgx/v5
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(ErrorResponse{
@@ -138,7 +134,6 @@ func GenerateTokenHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate the application token using the user's ID
 	tokenString, err := GenerateToken(user.ID)
 	if err != nil {
 		log.Printf("GenerateTokenHandler: Error generating token for user %d (%s): %v\n", user.ID, email, err)
