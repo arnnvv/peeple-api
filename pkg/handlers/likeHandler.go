@@ -116,7 +116,7 @@ func LikeHandler(w http.ResponseWriter, r *http.Request) {
 		reverseLikeExists = existsResult
 	}
 
-	var contentValid bool = false
+	var contentValid = false
 	var validationErr error
 
 	isProfileLikeAttempt := contentTypeEnum == migrations.ContentLikeTypeProfile && req.ContentIdentifier == profileLikeIdentifier
