@@ -75,7 +75,30 @@ func GetConversationHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("INFO: GetConversationHandler: Fetching FULL conversation between %d and %d (from request body)", requestingUserID, otherUserID)
+	log.Printf("INFO: GetConversationHandler: Checking for mutual like between %d and %d", requestingUserID, otherUserID)
+	mutualLikeParams := migrations.CheckMutualLikeExistsParams{
+		LikerUserID: requestingUserID,
+		LikedUserID: otherUserID,
+	}
+	mutualLikeResult, checkErr := queries.CheckMutualLikeExists(ctx, mutualLikeParams)
+	if checkErr != nil {
+		log.Printf("ERROR: GetConversationHandler: Failed to check mutual like between %d and %d: %v", requestingUserID, otherUserID, checkErr)
+		utils.RespondWithJSON(w, http.StatusInternalServerError, GetConversationResponse{Success: false, Message: "Error checking match status"})
+		return
+	}
+
+	if !mutualLikeResult.Valid || !mutualLikeResult.Bool {
+		log.Printf("INFO: GetConversationHandler: No mutual like found between %d and %d. Preventing chat fetch.", requestingUserID, otherUserID)
+		utils.RespondWithJSON(w, http.StatusForbidden, GetConversationResponse{
+			Success:  false,
+			Message:  "You can only view conversations with users you have matched with.",
+			Messages: []migrations.ChatMessage{},
+		})
+		return
+	}
+	log.Printf("INFO: GetConversationHandler: Mutual like confirmed between %d and %d. Proceeding to fetch messages.", requestingUserID, otherUserID)
+
+	log.Printf("INFO: GetConversationHandler: Fetching FULL conversation between %d and %d", requestingUserID, otherUserID)
 
 	params := migrations.GetConversationMessagesParams{
 		SenderUserID:    requestingUserID,
