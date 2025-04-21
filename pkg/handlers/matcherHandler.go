@@ -18,6 +18,7 @@ type MatchInfo struct {
 	FirstProfilePicURL string     `json:"first_profile_pic_url"`
 	LastMessage        *string    `json:"last_message,omitempty"`
 	LastMessageSentAt  *time.Time `json:"last_message_sent_at,omitempty"`
+	// LastMessageSenderID *int32     `json:"last_message_sender_id,omitempty"`
 }
 
 type GetMatchesResponse struct {
@@ -29,8 +30,8 @@ type GetMatchesResponse struct {
 func GetMatchesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	ctx := r.Context()
-	queries, _ := db.GetDB()
-	if queries == nil {
+	queries, errDb := db.GetDB()
+	if errDb != nil || queries == nil {
 		log.Println("ERROR: GetMatchesHandler: Database connection not available.")
 		utils.RespondWithJSON(w, http.StatusInternalServerError, GetMatchesResponse{Success: false, Message: "Database connection error", Matches: []MatchInfo{}})
 		return
@@ -66,21 +67,25 @@ func GetMatchesHandler(w http.ResponseWriter, r *http.Request) {
 			FirstProfilePicURL: getFirstMediaURL(dbMatch.MatchedUserMediaUrls),
 			LastMessage:        nil,
 			LastMessageSentAt:  nil,
+			// LastMessageSenderID: nil, // Initialize if added to MatchInfo
+		}
+
+
+		if dbMatch.LastMessageText != "" {
+			messageText := dbMatch.LastMessageText
+			match.LastMessage = &messageText
 		}
 
 		if dbMatch.LastMessageSentAt.Valid {
-			messageText := dbMatch.LastMessageText
-			match.LastMessage = &messageText
-
 			validTime := dbMatch.LastMessageSentAt.Time
 			match.LastMessageSentAt = &validTime
-
-			// Optionally handle sender ID if needed and generated correctly
-			// if dbMatch.LastMessageSenderID.Valid {
-			//     senderID := dbMatch.LastMessageSenderID.Int32
-			//     match.LastMessageSenderID = &senderID
-			// }
 		}
+
+		// if dbMatch.LastMessageSenderID != 0 { // If it's not the default 0 (assuming 0 is invalid ID)
+		//     senderID := dbMatch.LastMessageSenderID // Copy the value
+		//     match.LastMessageSenderID = &senderID   // Assign its address to the pointer
+		// }
+
 
 		responseMatches = append(responseMatches, match)
 	}

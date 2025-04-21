@@ -87,7 +87,6 @@ func (ns NullAudioPrompt) Value() (driver.Value, error) {
 	return string(ns.AudioPrompt), nil
 }
 
-// Specifies the type of profile content being liked.
 type ContentLikeType string
 
 const (
@@ -269,7 +268,6 @@ func (ns NullDrinkingSmokingHabits) Value() (driver.Value, error) {
 	return string(ns.DrinkingSmokingHabits), nil
 }
 
-// Enumerated type for representing gender identity.
 type GenderEnum string
 
 const (
@@ -362,7 +360,6 @@ func (ns NullGettingPersonalPromptType) Value() (driver.Value, error) {
 	return string(ns.GettingPersonalPromptType), nil
 }
 
-// Distinguishes standard likes from premium interactions like Roses.
 type LikeInteractionType string
 
 const (
@@ -456,7 +453,6 @@ func (ns NullMyTypePromptType) Value() (driver.Value, error) {
 	return string(ns.MyTypePromptType), nil
 }
 
-// Defines the types of premium features available.
 type PremiumFeatureType string
 
 const (
@@ -731,26 +727,19 @@ func (ns NullVerificationStatus) Value() (driver.Value, error) {
 	return string(ns.VerificationStatus), nil
 }
 
-// Logs each time a user is considered to have opened the app (triggered by a specific API call).
 type AppOpenLog struct {
 	ID       int64
 	UserID   int32
 	OpenedAt pgtype.Timestamptz
 }
 
-// Stores individual chat messages between users.
 type ChatMessage struct {
-	ID int64
-	// The ID of the user who sent the message.
-	SenderUserID int32
-	// The ID of the user who should receive the message.
+	ID              int64
+	SenderUserID    int32
 	RecipientUserID int32
-	// The content of the chat message.
-	MessageText string
-	// Timestamp when the message was sent.
-	SentAt pgtype.Timestamptz
-	// Flag indicating if the recipient has marked the message as read.
-	IsRead bool
+	MessageText     string
+	SentAt          pgtype.Timestamptz
+	IsRead          bool
 }
 
 type DateVibesPrompt struct {
@@ -760,7 +749,6 @@ type DateVibesPrompt struct {
 	Answer   string
 }
 
-// Stores records of users disliking other users.
 type Dislike struct {
 	DislikerUserID int32
 	DislikedUserID int32
@@ -768,19 +756,14 @@ type Dislike struct {
 }
 
 type Filter struct {
-	UserID int32
-	// Which gender the user wants to see in their feed.
+	UserID          int32
 	WhoYouWantToSee NullGenderEnum
-	// Maximum distance in kilometers for potential matches.
-	RadiusKm pgtype.Int4
-	// Filter for users active within the last 24 hours.
-	ActiveToday bool
-	// Minimum age preference.
-	AgeMin pgtype.Int4
-	// Maximum age preference.
-	AgeMax    pgtype.Int4
-	CreatedAt pgtype.Timestamptz
-	UpdatedAt pgtype.Timestamptz
+	RadiusKm        pgtype.Int4
+	ActiveToday     bool
+	AgeMin          pgtype.Int4
+	AgeMax          pgtype.Int4
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
 }
 
 type GettingPersonalPrompt struct {
@@ -790,20 +773,15 @@ type GettingPersonalPrompt struct {
 	Answer   string
 }
 
-// Stores records of users liking specific content items on other users profiles, optionally with a comment.
 type Like struct {
-	ID          int32
-	LikerUserID int32
-	LikedUserID int32
-	// The type of content that was liked (media, prompt, audio).
-	ContentType ContentLikeType
-	// Identifier for the specific content liked (e.g., media URL index, prompt question, "0" for audio).
+	ID                int32
+	LikerUserID       int32
+	LikedUserID       int32
+	ContentType       ContentLikeType
 	ContentIdentifier string
-	// Optional comment sent with the like (max 140 chars).
-	Comment pgtype.Text
-	// Distinguishes standard likes from premium interactions like Roses.
-	InteractionType LikeInteractionType
-	CreatedAt       pgtype.Timestamptz
+	Comment           pgtype.Text
+	InteractionType   LikeInteractionType
+	CreatedAt         pgtype.Timestamptz
 }
 
 type MyTypePrompt struct {
@@ -829,49 +807,44 @@ type StoryTimePrompt struct {
 }
 
 type User struct {
-	ID                  int32
-	CreatedAt           pgtype.Timestamptz
-	Name                pgtype.Text
-	LastName            pgtype.Text
-	Email               string
-	DateOfBirth         pgtype.Date
-	Latitude            pgtype.Float8
-	Longitude           pgtype.Float8
-	Gender              NullGenderEnum
-	DatingIntention     NullDatingIntention
-	Height              pgtype.Float8
-	Hometown            pgtype.Text
-	JobTitle            pgtype.Text
-	Education           pgtype.Text
-	ReligiousBeliefs    NullReligion
-	DrinkingHabit       NullDrinkingSmokingHabits
-	SmokingHabit        NullDrinkingSmokingHabits
-	MediaUrls           []string
-	VerificationStatus  VerificationStatus
-	VerificationPic     pgtype.Text
-	Role                UserRole
-	AudioPromptQuestion NullAudioPrompt
-	AudioPromptAnswer   pgtype.Text
-	// Timestamp until which the user's profile is boosted by Spotlight.
+	ID                   int32
+	CreatedAt            pgtype.Timestamptz
+	Name                 pgtype.Text
+	LastName             pgtype.Text
+	Email                string
+	DateOfBirth          pgtype.Date
+	Latitude             pgtype.Float8
+	Longitude            pgtype.Float8
+	Gender               NullGenderEnum
+	DatingIntention      NullDatingIntention
+	Height               pgtype.Float8
+	Hometown             pgtype.Text
+	JobTitle             pgtype.Text
+	Education            pgtype.Text
+	ReligiousBeliefs     NullReligion
+	DrinkingHabit        NullDrinkingSmokingHabits
+	SmokingHabit         NullDrinkingSmokingHabits
+	MediaUrls            []string
+	VerificationStatus   VerificationStatus
+	VerificationPic      pgtype.Text
+	Role                 UserRole
+	AudioPromptQuestion  NullAudioPrompt
+	AudioPromptAnswer    pgtype.Text
 	SpotlightActiveUntil pgtype.Timestamptz
 }
 
-// Tracks the balance of quantity-based premium items (Roses, Spotlights) for users.
 type UserConsumable struct {
 	UserID         int32
 	ConsumableType PremiumFeatureType
-	// The number of remaining items the user possesses.
-	Quantity  int32
-	UpdatedAt pgtype.Timestamptz
+	Quantity       int32
+	UpdatedAt      pgtype.Timestamptz
 }
 
-// Tracks active time-based premium features for users.
 type UserSubscription struct {
 	ID          int32
 	UserID      int32
 	FeatureType PremiumFeatureType
 	ActivatedAt pgtype.Timestamptz
-	// Timestamp when the subscription benefit ends.
-	ExpiresAt pgtype.Timestamptz
-	CreatedAt pgtype.Timestamptz
+	ExpiresAt   pgtype.Timestamptz
+	CreatedAt   pgtype.Timestamptz
 }

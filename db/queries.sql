@@ -380,15 +380,18 @@ INSERT INTO reports (
 RETURNING id, reporter_user_id, reported_user_id, reason, created_at;
 
 -- name: GetMatchesWithLastMessage :many
--- Fetches users mutually liked by the requesting user, along with the last chat message between them.
 SELECT
     target_user.id AS matched_user_id,
     target_user.name AS matched_user_name,
     target_user.last_name AS matched_user_last_name,
     target_user.media_urls AS matched_user_media_urls,
-    last_msg.message_text AS last_message_text,
+    -- return an empty string '' if last_msg.message_text is NULL
+    COALESCE(last_msg.message_text, '') AS last_message_text,
+    -- Keep last_msg.sent_at as is; pgtype.Timestamptz handles NULL correctly
     last_msg.sent_at AS last_message_sent_at,
-    last_msg.sender_user_id AS last_message_sender_id
+    -- Use COALESCE to return 0 if last_msg.sender_user_id is NULL.
+    -- IMPORTANT: Ensure 0 is not a valid user ID in your system, otherwise use -1 or another sentinel.
+    COALESCE(last_msg.sender_user_id, 0) AS last_message_sender_id
 FROM
     likes l1
 JOIN
