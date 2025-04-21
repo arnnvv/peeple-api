@@ -130,7 +130,7 @@ func setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/matches", authMiddleware(handlers.GetMatchesHandler))
 	mux.HandleFunc("/api/iap/verify", authMiddleware(handlers.VerifyPurchaseHandler))
 	mux.HandleFunc("/chat", authMiddleware(handlers.ChatHandler))
-	mux.HandleFunc("/api/conversation/", authMiddleware(handlers.GetConversationHandler))
+	mux.HandleFunc("/api/conversation", authMiddleware(handlers.GetConversationHandler))
 
 	adminMiddleware := token.AdminAuthMiddleware
 	mux.HandleFunc("/api/set-admin", adminMiddleware(handlers.SetAdminHandler))

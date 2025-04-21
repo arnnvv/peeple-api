@@ -478,25 +478,15 @@ SELECT id, sender_user_id, recipient_user_id, message_text, sent_at, is_read FRO
 WHERE (sender_user_id = $1 AND recipient_user_id = $2)
    OR (sender_user_id = $2 AND recipient_user_id = $1)
 ORDER BY sent_at ASC
-LIMIT $3 OFFSET $4
 `
 
 type GetConversationMessagesParams struct {
 	SenderUserID    int32
 	RecipientUserID int32
-	Limit           int32
-	Offset          int32
 }
 
-// Retrieves messages between two specific users, ordered by time.
-// Useful for loading chat history.
 func (q *Queries) GetConversationMessages(ctx context.Context, arg GetConversationMessagesParams) ([]ChatMessage, error) {
-	rows, err := q.db.Query(ctx, getConversationMessages,
-		arg.SenderUserID,
-		arg.RecipientUserID,
-		arg.Limit,
-		arg.Offset,
-	)
+	rows, err := q.db.Query(ctx, getConversationMessages, arg.SenderUserID, arg.RecipientUserID)
 	if err != nil {
 		return nil, err
 	}

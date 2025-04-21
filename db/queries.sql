@@ -347,13 +347,10 @@ INSERT INTO chat_messages (
 ) RETURNING *;
 
 -- name: GetConversationMessages :many
--- Retrieves messages between two specific users, ordered by time.
--- Useful for loading chat history.
 SELECT * FROM chat_messages
 WHERE (sender_user_id = $1 AND recipient_user_id = $2)
    OR (sender_user_id = $2 AND recipient_user_id = $1)
-ORDER BY sent_at ASC
-LIMIT $3 OFFSET $4;
+ORDER BY sent_at ASC;
 
 -- name: MarkMessagesAsRead :exec
 UPDATE chat_messages

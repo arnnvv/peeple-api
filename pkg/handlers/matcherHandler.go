@@ -70,7 +70,6 @@ func GetMatchesHandler(w http.ResponseWriter, r *http.Request) {
 			// LastMessageSenderID: nil, // Initialize if added to MatchInfo
 		}
 
-
 		if dbMatch.LastMessageText != "" {
 			messageText := dbMatch.LastMessageText
 			match.LastMessage = &messageText
@@ -85,7 +84,6 @@ func GetMatchesHandler(w http.ResponseWriter, r *http.Request) {
 		//     senderID := dbMatch.LastMessageSenderID // Copy the value
 		//     match.LastMessageSenderID = &senderID   // Assign its address to the pointer
 		// }
-
 
 		responseMatches = append(responseMatches, match)
 	}
