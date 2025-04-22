@@ -170,27 +170,39 @@ const createChatMessage = `-- name: CreateChatMessage :one
 INSERT INTO chat_messages (
     sender_user_id,
     recipient_user_id,
-    message_text
+    message_text,
+    media_url,
+    media_type
 ) VALUES (
-    $1, $2, $3
-) RETURNING id, sender_user_id, recipient_user_id, message_text, sent_at, is_read
+    $1, $2, $3, $4, $5
+) RETURNING id, sender_user_id, recipient_user_id, message_text, media_url, media_type, sent_at, is_read
 `
 
 type CreateChatMessageParams struct {
 	SenderUserID    int32
 	RecipientUserID int32
-	MessageText     string
+	MessageText     pgtype.Text
+	MediaUrl        pgtype.Text
+	MediaType       pgtype.Text
 }
 
 // Chat Queries (from partner branch) --
 func (q *Queries) CreateChatMessage(ctx context.Context, arg CreateChatMessageParams) (ChatMessage, error) {
-	row := q.db.QueryRow(ctx, createChatMessage, arg.SenderUserID, arg.RecipientUserID, arg.MessageText)
+	row := q.db.QueryRow(ctx, createChatMessage,
+		arg.SenderUserID,
+		arg.RecipientUserID,
+		arg.MessageText,
+		arg.MediaUrl,
+		arg.MediaType,
+	)
 	var i ChatMessage
 	err := row.Scan(
 		&i.ID,
 		&i.SenderUserID,
 		&i.RecipientUserID,
 		&i.MessageText,
+		&i.MediaUrl,
+		&i.MediaType,
 		&i.SentAt,
 		&i.IsRead,
 	)
@@ -474,7 +486,7 @@ func (q *Queries) GetActiveSubscription(ctx context.Context, arg GetActiveSubscr
 }
 
 const getConversationMessages = `-- name: GetConversationMessages :many
-SELECT id, sender_user_id, recipient_user_id, message_text, sent_at, is_read FROM chat_messages
+SELECT id, sender_user_id, recipient_user_id, message_text, media_url, media_type, sent_at, is_read FROM chat_messages
 WHERE (sender_user_id = $1 AND recipient_user_id = $2)
    OR (sender_user_id = $2 AND recipient_user_id = $1)
 ORDER BY sent_at ASC
@@ -499,6 +511,8 @@ func (q *Queries) GetConversationMessages(ctx context.Context, arg GetConversati
 			&i.SenderUserID,
 			&i.RecipientUserID,
 			&i.MessageText,
+			&i.MediaUrl,
+			&i.MediaType,
 			&i.SentAt,
 			&i.IsRead,
 		); err != nil {

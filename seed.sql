@@ -1,6 +1,14 @@
---
--- Data for Name: users; Type: TABLE DATA; Schema: public; Owner: neondb_owner
---
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET transaction_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
 
 COPY public.users (id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until) FROM stdin;
 1	2025-04-20 12:57:09.440764+00	Alice	Smith	alice.smith@email.com	1997-03-15	29.8665972	77.90812129028555	woman	longTerm	165	New York	Software Engineer	Masters Degree	agnostic	sometimes	no	{media/alice1.jpg,media/alice2.jpg,media/alice3.png}	true	\N	user	aRandomFactILoveIs	audio/alice_randomfact.mp3	\N
@@ -19,10 +27,6 @@ COPY public.users (id, created_at, name, last_name, email, date_of_birth, latitu
 17	2025-04-21 15:02:53.690116+00	kushal		ayushiitroorkie@gmail.com	2006-05-05	29.8665951	77.8999037	man	longTermOpenShort	66	Lucknow	Athlete	Nift	buddhist	no	no	{https://peeple1.s3.ap-south-1.amazonaws.com/uploads/17/2025-04-21/IMG_20250421_185657_071.jpg,https://peeple1.s3.ap-south-1.amazonaws.com/uploads/17/2025-04-21/IMG_20250421_185656_900.jpg,https://peeple1.s3.ap-south-1.amazonaws.com/uploads/17/2025-04-21/IMG_20250421_185656_897.jpg}	false	\N	user	cookWithMe	https://peeple1.s3.ap-south-1.amazonaws.com/users/17/audio/cookwithme/1745247970793197186-voice_prompt_1745247961233.m4a	\N
 \.
 
---
--- Data for Name: app_open_logs; Type: TABLE DATA; Schema: public; Owner: neondb_owner
---
-
 COPY public.app_open_logs (id, user_id, opened_at) FROM stdin;
 1	1	2025-04-20 11:57:09.440764+00
 2	2	2025-04-18 12:57:09.440764+00
@@ -36,18 +40,8 @@ COPY public.app_open_logs (id, user_id, opened_at) FROM stdin;
 10	9	2025-04-20 08:57:09.440764+00
 \.
 
-
---
--- Data for Name: chat_messages; Type: TABLE DATA; Schema: public; Owner: neondb_owner
---
-
-COPY public.chat_messages (id, sender_user_id, recipient_user_id, message_text, sent_at, is_read) FROM stdin;
+COPY public.chat_messages (id, sender_user_id, recipient_user_id, message_text, media_url, media_type, sent_at, is_read) FROM stdin;
 \.
-
-
---
--- Data for Name: date_vibes_prompts; Type: TABLE DATA; Schema: public; Owner: neondb_owner
---
 
 COPY public.date_vibes_prompts (id, user_id, question, answer) FROM stdin;
 1	2	togetherWeCould	Explore art galleries in Chelsea, find hidden taco trucks in Bushwick, and debate the best bagel spot.
@@ -56,18 +50,8 @@ COPY public.date_vibes_prompts (id, user_id, question, answer) FROM stdin;
 4	9	bestWayToAskMeOut	Just be direct and suggest a specific plan! Bonus points for a cool cocktail bar in the LES.
 \.
 
-
---
--- Data for Name: dislikes; Type: TABLE DATA; Schema: public; Owner: neondb_owner
---
-
 COPY public.dislikes (disliker_user_id, disliked_user_id, created_at) FROM stdin;
 \.
-
-
---
--- Data for Name: filters; Type: TABLE DATA; Schema: public; Owner: neondb_owner
---
 
 COPY public.filters (user_id, who_you_want_to_see, radius_km, active_today, age_min, age_max, created_at, updated_at) FROM stdin;
 1	man	20	t	25	30	2025-04-20 12:57:09.440764+00	2025-04-20 12:57:09.440764+00
@@ -85,11 +69,6 @@ COPY public.filters (user_id, who_you_want_to_see, radius_km, active_today, age_
 18	man	500	f	18	55	2025-04-21 15:07:31.488501+00	2025-04-21 15:07:31.488501+00
 \.
 
-
---
--- Data for Name: getting_personal_prompts; Type: TABLE DATA; Schema: public; Owner: neondb_owner
---
-
 COPY public.getting_personal_prompts (id, user_id, question, answer) FROM stdin;
 1	1	oneThingYouShouldKnow	I can be a bit introverted at first, but I warm up quickly!
 2	3	geekOutOn	Vintage synthesizers and finding hidden music venues in Brooklyn.
@@ -99,18 +78,8 @@ COPY public.getting_personal_prompts (id, user_id, question, answer) FROM stdin;
 6	18	loveLanguage	Surgery
 \.
 
-
---
--- Data for Name: likes; Type: TABLE DATA; Schema: public; Owner: neondb_owner
---
-
 COPY public.likes (id, liker_user_id, liked_user_id, content_type, content_identifier, comment, interaction_type, created_at) FROM stdin;
 \.
-
-
---
--- Data for Name: my_type_prompts; Type: TABLE DATA; Schema: public; Owner: neondb_owner
---
 
 COPY public.my_type_prompts (id, user_id, question, answer) FROM stdin;
 1	1	lookingFor	Someone kind, funny, and adventurous who enjoys exploring the city.
@@ -120,20 +89,10 @@ COPY public.my_type_prompts (id, user_id, question, answer) FROM stdin;
 5	8	greenFlags	Being genuinely curious about others and practicing active listening.
 \.
 
-
---
--- Data for Name: reports; Type: TABLE DATA; Schema: public; Owner: neondb_owner
---
-
 COPY public.reports (id, reporter_user_id, reported_user_id, reason, created_at) FROM stdin;
 1	1	9	inappropriate	2025-04-17 12:57:09.440764+00
 2	5	3	spam	2025-04-13 12:57:09.440764+00
 \.
-
-
---
--- Data for Name: story_time_prompts; Type: TABLE DATA; Schema: public; Owner: neondb_owner
---
 
 COPY public.story_time_prompts (id, user_id, question, answer) FROM stdin;
 1	1	twoTruthsAndALie	I speak 3 languages. I've run the NYC marathon. I hate pizza. (The lie is hating pizza!)
@@ -149,11 +108,6 @@ COPY public.story_time_prompts (id, user_id, question, answer) FROM stdin;
 14	18	oneThingNeverDoAgain	MBBS
 \.
 
-
---
--- Data for Name: user_consumables; Type: TABLE DATA; Schema: public; Owner: neondb_owner
---
-
 COPY public.user_consumables (user_id, consumable_type, quantity, updated_at) FROM stdin;
 1	rose	3	2025-04-20 12:57:09.440764+00
 4	spotlight	1	2025-04-20 12:57:09.440764+00
@@ -164,12 +118,27 @@ COPY public.user_consumables (user_id, consumable_type, quantity, updated_at) FR
 18	rose	1	2025-04-21 15:06:46.550048+00
 \.
 
-
---
--- Data for Name: user_subscriptions; Type: TABLE DATA; Schema: public; Owner: neondb_owner
---
-
 COPY public.user_subscriptions (id, user_id, feature_type, activated_at, expires_at, created_at) FROM stdin;
 1	2	unlimited_likes	2025-04-10 12:57:09.440764+00	2025-05-10 12:57:09.440764+00	2025-04-20 12:57:09.440764+00
 2	5	travel_mode	2025-04-18 12:57:09.440764+00	2025-04-25 12:57:09.440764+00	2025-04-20 12:57:09.440764+00
 \.
+
+SELECT pg_catalog.setval('public.app_open_logs_id_seq', 1, false);
+
+SELECT pg_catalog.setval('public.chat_messages_id_seq', 1, false);
+
+SELECT pg_catalog.setval('public.date_vibes_prompts_id_seq', 1, false);
+
+SELECT pg_catalog.setval('public.getting_personal_prompts_id_seq', 1, false);
+
+SELECT pg_catalog.setval('public.likes_id_seq', 1, false);
+
+SELECT pg_catalog.setval('public.my_type_prompts_id_seq', 1, false);
+
+SELECT pg_catalog.setval('public.reports_id_seq', 1, false);
+
+SELECT pg_catalog.setval('public.story_time_prompts_id_seq', 1, false);
+
+SELECT pg_catalog.setval('public.user_subscriptions_id_seq', 1, false);
+
+SELECT pg_catalog.setval('public.users_id_seq', 1, false);

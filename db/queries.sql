@@ -341,9 +341,11 @@ LIMIT 1;
 INSERT INTO chat_messages (
     sender_user_id,
     recipient_user_id,
-    message_text
+    message_text,
+    media_url,
+    media_type
 ) VALUES (
-    $1, $2, $3
+    $1, $2, $3, $4, $5
 ) RETURNING *;
 
 -- name: GetConversationMessages :many

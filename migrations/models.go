@@ -737,7 +737,9 @@ type ChatMessage struct {
 	ID              int64
 	SenderUserID    int32
 	RecipientUserID int32
-	MessageText     string
+	MessageText     pgtype.Text
+	MediaUrl        pgtype.Text
+	MediaType       pgtype.Text
 	SentAt          pgtype.Timestamptz
 	IsRead          bool
 }

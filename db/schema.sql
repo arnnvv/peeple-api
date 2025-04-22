@@ -258,10 +258,26 @@ CREATE TABLE chat_messages (
     id BIGSERIAL PRIMARY KEY,
     sender_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     recipient_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    message_text TEXT NOT NULL CHECK (length(message_text) > 0 AND length(message_text) <= 5000),
+    message_text TEXT,
+    media_url TEXT,
+    media_type TEXT,
     sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     is_read BOOLEAN NOT NULL DEFAULT false,
-    CONSTRAINT chk_sender_recipient_different CHECK (sender_user_id <> recipient_user_id)
+    CONSTRAINT chk_sender_recipient_different CHECK (sender_user_id <> recipient_user_id),
+    CONSTRAINT chk_message_content CHECK (
+    (
+      message_text IS NOT NULL
+      AND media_url IS NULL
+      AND media_type IS NULL
+      AND char_length(message_text) BETWEEN 1 AND 500
+    )
+    OR
+    (
+      message_text IS NULL
+      AND media_url IS NOT NULL
+      AND media_type IS NOT NULL
+    )
+  )
 );
 
 CREATE INDEX idx_chat_messages_conversation ON chat_messages (sender_user_id, recipient_user_id, sent_at DESC);
