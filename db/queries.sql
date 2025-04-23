@@ -17,6 +17,15 @@ INSERT INTO users (
 )
 RETURNING *;
 
+-- name: UpdateUserLastOnline :exec
+UPDATE users
+SET last_online = NOW()
+WHERE id = $1;
+
+-- name: GetUserLastOnline :one
+SELECT last_online FROM users
+WHERE id = $1 LIMIT 1;
+
 -- name: GetPendingVerificationUsers :many
 -- Fetches users whose verification status is 'pending'.
 SELECT * FROM users

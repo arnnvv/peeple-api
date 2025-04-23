@@ -134,6 +134,8 @@ func setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/chat/upload", authMiddleware(handlers.GenerateChatMediaPresignedURL))
 	mux.HandleFunc("/api/chat/mark-read-until", authMiddleware(handlers.MarkReadUntilHandler))
 	mux.HandleFunc("/api/unread-chat-count", authMiddleware(handlers.GetUnreadCountHandler))
+	mux.HandleFunc("/api/me/update-online", authMiddleware(handlers.UpdateOnlineStatusHandler))
+	mux.HandleFunc("/api/user/last-online", authMiddleware(handlers.FetchLastOnlineHandler))
 
 	adminMiddleware := token.AdminAuthMiddleware
 	mux.HandleFunc("/api/set-admin", adminMiddleware(handlers.SetAdminHandler))

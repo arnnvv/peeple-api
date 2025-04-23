@@ -130,10 +130,12 @@ CREATE TABLE users (
     role user_role NOT NULL DEFAULT 'user',
     audio_prompt_question audio_prompt,
     audio_prompt_answer TEXT,
-    spotlight_active_until TIMESTAMPTZ NULL
+    spotlight_active_until TIMESTAMPTZ NULL,
+    last_online TIMESTAMPTZ
 );
 CREATE INDEX idx_users_spotlight_active ON users (spotlight_active_until) WHERE spotlight_active_until IS NOT NULL;
 CREATE INDEX idx_users_email ON users (email);
+CREATE INDEX idx_users_last_online ON users (last_online DESC NULLS LAST);
 
 CREATE TABLE story_time_prompts (
     id SERIAL PRIMARY KEY,

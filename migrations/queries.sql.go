@@ -342,7 +342,7 @@ INSERT INTO users (
 ) VALUES (
     $1
 )
-RETURNING id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until
+RETURNING id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until, last_online
 `
 
 // Creates a new user with only their email address initially.
@@ -374,6 +374,7 @@ func (q *Queries) CreateUserWithEmail(ctx context.Context, email string) (User, 
 		&i.AudioPromptQuestion,
 		&i.AudioPromptAnswer,
 		&i.SpotlightActiveUntil,
+		&i.LastOnline,
 	)
 	return i, err
 }
@@ -554,7 +555,7 @@ WITH RequestingUser AS (
     GROUP BY user_id
 )
 SELECT
-    target_user.id, target_user.created_at, target_user.name, target_user.last_name, target_user.email, target_user.date_of_birth, target_user.latitude, target_user.longitude, target_user.gender, target_user.dating_intention, target_user.height, target_user.hometown, target_user.job_title, target_user.education, target_user.religious_beliefs, target_user.drinking_habit, target_user.smoking_habit, target_user.media_urls, target_user.verification_status, target_user.verification_pic, target_user.role, target_user.audio_prompt_question, target_user.audio_prompt_answer, target_user.spotlight_active_until, -- Select all columns from the users table
+    target_user.id, target_user.created_at, target_user.name, target_user.last_name, target_user.email, target_user.date_of_birth, target_user.latitude, target_user.longitude, target_user.gender, target_user.dating_intention, target_user.height, target_user.hometown, target_user.job_title, target_user.education, target_user.religious_beliefs, target_user.drinking_habit, target_user.smoking_habit, target_user.media_urls, target_user.verification_status, target_user.verification_pic, target_user.role, target_user.audio_prompt_question, target_user.audio_prompt_answer, target_user.spotlight_active_until, target_user.last_online, -- Select all columns from the users table
     -- Aggregate prompts for the target user, default to empty array if none
     COALESCE(ap.prompts, '[]'::jsonb) as prompts,
     -- Calculate distance
@@ -624,6 +625,7 @@ type GetHomeFeedRow struct {
 	AudioPromptQuestion  NullAudioPrompt
 	AudioPromptAnswer    pgtype.Text
 	SpotlightActiveUntil pgtype.Timestamptz
+	LastOnline           pgtype.Timestamptz
 	Prompts              []byte
 	DistanceKm           float64
 }
@@ -664,6 +666,7 @@ func (q *Queries) GetHomeFeed(ctx context.Context, arg GetHomeFeedParams) ([]Get
 			&i.AudioPromptQuestion,
 			&i.AudioPromptAnswer,
 			&i.SpotlightActiveUntil,
+			&i.LastOnline,
 			&i.Prompts,
 			&i.DistanceKm,
 		); err != nil {
@@ -853,7 +856,7 @@ func (q *Queries) GetMatchesWithLastMessage(ctx context.Context, likerUserID int
 }
 
 const getPendingVerificationUsers = `-- name: GetPendingVerificationUsers :many
-SELECT id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until FROM users
+SELECT id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until, last_online FROM users
 WHERE verification_status = $1
 `
 
@@ -892,6 +895,7 @@ func (q *Queries) GetPendingVerificationUsers(ctx context.Context, verificationS
 			&i.AudioPromptQuestion,
 			&i.AudioPromptAnswer,
 			&i.SpotlightActiveUntil,
+			&i.LastOnline,
 		); err != nil {
 			return nil, err
 		}
@@ -905,7 +909,7 @@ func (q *Queries) GetPendingVerificationUsers(ctx context.Context, verificationS
 
 const getQuickFeed = `-- name: GetQuickFeed :many
 SELECT
-    target_user.id, target_user.created_at, target_user.name, target_user.last_name, target_user.email, target_user.date_of_birth, target_user.latitude, target_user.longitude, target_user.gender, target_user.dating_intention, target_user.height, target_user.hometown, target_user.job_title, target_user.education, target_user.religious_beliefs, target_user.drinking_habit, target_user.smoking_habit, target_user.media_urls, target_user.verification_status, target_user.verification_pic, target_user.role, target_user.audio_prompt_question, target_user.audio_prompt_answer, target_user.spotlight_active_until,
+    target_user.id, target_user.created_at, target_user.name, target_user.last_name, target_user.email, target_user.date_of_birth, target_user.latitude, target_user.longitude, target_user.gender, target_user.dating_intention, target_user.height, target_user.hometown, target_user.job_title, target_user.education, target_user.religious_beliefs, target_user.drinking_habit, target_user.smoking_habit, target_user.media_urls, target_user.verification_status, target_user.verification_pic, target_user.role, target_user.audio_prompt_question, target_user.audio_prompt_answer, target_user.spotlight_active_until, target_user.last_online,
     haversine($1, $2, target_user.latitude, target_user.longitude) AS distance_km
 FROM users AS target_user
 WHERE
@@ -953,6 +957,7 @@ type GetQuickFeedRow struct {
 	AudioPromptQuestion  NullAudioPrompt
 	AudioPromptAnswer    pgtype.Text
 	SpotlightActiveUntil pgtype.Timestamptz
+	LastOnline           pgtype.Timestamptz
 	DistanceKm           float64
 }
 
@@ -999,6 +1004,7 @@ func (q *Queries) GetQuickFeed(ctx context.Context, arg GetQuickFeedParams) ([]G
 			&i.AudioPromptQuestion,
 			&i.AudioPromptAnswer,
 			&i.SpotlightActiveUntil,
+			&i.LastOnline,
 			&i.DistanceKm,
 		); err != nil {
 			return nil, err
@@ -1045,7 +1051,7 @@ func (q *Queries) GetUserAudioPrompt(ctx context.Context, id int32) (GetUserAudi
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until FROM users
+SELECT id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until, last_online FROM users
 WHERE email = $1 LIMIT 1
 `
 
@@ -1077,13 +1083,14 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.AudioPromptQuestion,
 		&i.AudioPromptAnswer,
 		&i.SpotlightActiveUntil,
+		&i.LastOnline,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
 
-SELECT id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until FROM users
+SELECT id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until, last_online FROM users
 WHERE id = $1 LIMIT 1
 `
 
@@ -1116,6 +1123,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id int32) (User, error) {
 		&i.AudioPromptQuestion,
 		&i.AudioPromptAnswer,
 		&i.SpotlightActiveUntil,
+		&i.LastOnline,
 	)
 	return i, err
 }
@@ -1220,6 +1228,18 @@ func (q *Queries) GetUserGettingPersonalPrompts(ctx context.Context, userID int3
 		return nil, err
 	}
 	return items, nil
+}
+
+const getUserLastOnline = `-- name: GetUserLastOnline :one
+SELECT last_online FROM users
+WHERE id = $1 LIMIT 1
+`
+
+func (q *Queries) GetUserLastOnline(ctx context.Context, id int32) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getUserLastOnline, id)
+	var last_online pgtype.Timestamptz
+	err := row.Scan(&last_online)
+	return last_online, err
 }
 
 const getUserMyTypePrompts = `-- name: GetUserMyTypePrompts :many
@@ -1335,13 +1355,24 @@ func (q *Queries) UpdateAudioPrompt(ctx context.Context, arg UpdateAudioPromptPa
 	return i, err
 }
 
+const updateUserLastOnline = `-- name: UpdateUserLastOnline :exec
+UPDATE users
+SET last_online = NOW()
+WHERE id = $1
+`
+
+func (q *Queries) UpdateUserLastOnline(ctx context.Context, id int32) error {
+	_, err := q.db.Exec(ctx, updateUserLastOnline, id)
+	return err
+}
+
 const updateUserLocationGender = `-- name: UpdateUserLocationGender :one
 UPDATE users SET
     latitude = $1,
     longitude = $2,
     gender = $3
 WHERE id = $4
-RETURNING id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until
+RETURNING id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until, last_online
 `
 
 type UpdateUserLocationGenderParams struct {
@@ -1385,6 +1416,7 @@ func (q *Queries) UpdateUserLocationGender(ctx context.Context, arg UpdateUserLo
 		&i.AudioPromptQuestion,
 		&i.AudioPromptAnswer,
 		&i.SpotlightActiveUntil,
+		&i.LastOnline,
 	)
 	return i, err
 }
@@ -1421,7 +1453,7 @@ UPDATE users SET
     drinking_habit = $10,     -- param $10
     smoking_habit = $11       -- param $11
 WHERE id = $12                -- param $12
-RETURNING id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until
+RETURNING id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until, last_online
 `
 
 type UpdateUserProfileParams struct {
@@ -1483,6 +1515,7 @@ func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfilePa
 		&i.AudioPromptQuestion,
 		&i.AudioPromptAnswer,
 		&i.SpotlightActiveUntil,
+		&i.LastOnline,
 	)
 	return i, err
 }
@@ -1491,7 +1524,7 @@ const updateUserRole = `-- name: UpdateUserRole :one
 UPDATE users
 SET role = $1
 WHERE id = $2
-RETURNING id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until
+RETURNING id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until, last_online
 `
 
 type UpdateUserRoleParams struct {
@@ -1528,6 +1561,7 @@ func (q *Queries) UpdateUserRole(ctx context.Context, arg UpdateUserRoleParams) 
 		&i.AudioPromptQuestion,
 		&i.AudioPromptAnswer,
 		&i.SpotlightActiveUntil,
+		&i.LastOnline,
 	)
 	return i, err
 }
@@ -1538,7 +1572,7 @@ SET
     verification_pic = $1,
     verification_status = $2
 WHERE id = $3
-RETURNING id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until
+RETURNING id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until, last_online
 `
 
 type UpdateUserVerificationDetailsParams struct {
@@ -1576,6 +1610,7 @@ func (q *Queries) UpdateUserVerificationDetails(ctx context.Context, arg UpdateU
 		&i.AudioPromptQuestion,
 		&i.AudioPromptAnswer,
 		&i.SpotlightActiveUntil,
+		&i.LastOnline,
 	)
 	return i, err
 }
@@ -1584,7 +1619,7 @@ const updateUserVerificationStatus = `-- name: UpdateUserVerificationStatus :one
 UPDATE users
 SET verification_status = $1
 WHERE id = $2
-RETURNING id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until
+RETURNING id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until, last_online
 `
 
 type UpdateUserVerificationStatusParams struct {
@@ -1621,6 +1656,7 @@ func (q *Queries) UpdateUserVerificationStatus(ctx context.Context, arg UpdateUs
 		&i.AudioPromptQuestion,
 		&i.AudioPromptAnswer,
 		&i.SpotlightActiveUntil,
+		&i.LastOnline,
 	)
 	return i, err
 }

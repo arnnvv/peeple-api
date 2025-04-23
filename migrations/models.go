@@ -833,6 +833,7 @@ type User struct {
 	AudioPromptQuestion  NullAudioPrompt
 	AudioPromptAnswer    pgtype.Text
 	SpotlightActiveUntil pgtype.Timestamptz
+	LastOnline           pgtype.Timestamptz
 }
 
 type UserConsumable struct {
