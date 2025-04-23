@@ -468,3 +468,18 @@ WHERE l.liked_user_id = $1 -- The user receiving the likes
       WHERE l2.liker_user_id = l.liked_user_id -- The recipient liked the liker back
         AND l2.liked_user_id = l.liker_user_id
   );
+
+-- name: MarkLikesAsSeenUntil :execresult
+UPDATE likes
+SET is_seen = true
+WHERE liked_user_id = $1
+  AND id <= $2
+  AND is_seen = false;
+
+-- name: CheckLikeExistsForRecipient :one
+SELECT EXISTS (
+    SELECT 1
+    FROM likes
+    WHERE id = $1
+      AND liked_user_id = $2
+);
