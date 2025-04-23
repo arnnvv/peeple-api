@@ -25,7 +25,7 @@ INSERT INTO likes (
 )
 ON CONFLICT (liker_user_id, liked_user_id, content_type, content_identifier)
 DO NOTHING
-RETURNING id, liker_user_id, liked_user_id, content_type, content_identifier, comment, interaction_type, created_at
+RETURNING id, liker_user_id, liked_user_id, content_type, content_identifier, comment, interaction_type, is_seen, created_at
 `
 
 type AddContentLikeParams struct {
@@ -55,6 +55,7 @@ func (q *Queries) AddContentLike(ctx context.Context, arg AddContentLikeParams) 
 		&i.ContentIdentifier,
 		&i.Comment,
 		&i.InteractionType,
+		&i.IsSeen,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -681,7 +682,6 @@ func (q *Queries) GetHomeFeed(ctx context.Context, arg GetHomeFeedParams) ([]Get
 }
 
 const getLikeDetails = `-- name: GetLikeDetails :one
-
 SELECT
     comment,
     interaction_type
@@ -701,7 +701,6 @@ type GetLikeDetailsRow struct {
 	InteractionType LikeInteractionType
 }
 
-// Then by time
 func (q *Queries) GetLikeDetails(ctx context.Context, arg GetLikeDetailsParams) (GetLikeDetailsRow, error) {
 	row := q.db.QueryRow(ctx, getLikeDetails, arg.LikerUserID, arg.LikedUserID)
 	var i GetLikeDetailsRow
@@ -711,25 +710,36 @@ func (q *Queries) GetLikeDetails(ctx context.Context, arg GetLikeDetailsParams) 
 
 const getLikersForUser = `-- name: GetLikersForUser :many
 SELECT
+    l.id AS like_id,
     l.liker_user_id,
     l.comment,
     l.interaction_type,
+    l.is_seen,
     l.created_at as liked_at,
     u.name,
     u.last_name,
     u.media_urls
 FROM likes l
 JOIN users u ON l.liker_user_id = u.id
-WHERE l.liked_user_id = $1 -- The user receiving the likes (current user)
+WHERE l.liked_user_id = $1
+  AND NOT EXISTS (
+      SELECT 1
+      FROM likes l2
+      WHERE l2.liker_user_id = l.liked_user_id
+        AND l2.liked_user_id = l.liker_user_id
+  )
 ORDER BY
-    (l.interaction_type = 'rose') DESC, -- Roses first
+    (l.interaction_type = 'rose') DESC,
+    l.is_seen ASC,
     l.created_at DESC
 `
 
 type GetLikersForUserRow struct {
+	LikeID          int32
 	LikerUserID     int32
 	Comment         pgtype.Text
 	InteractionType LikeInteractionType
+	IsSeen          pgtype.Bool
 	LikedAt         pgtype.Timestamptz
 	Name            pgtype.Text
 	LastName        pgtype.Text
@@ -746,9 +756,11 @@ func (q *Queries) GetLikersForUser(ctx context.Context, likedUserID int32) ([]Ge
 	for rows.Next() {
 		var i GetLikersForUserRow
 		if err := rows.Scan(
+			&i.LikeID,
 			&i.LikerUserID,
 			&i.Comment,
 			&i.InteractionType,
+			&i.IsSeen,
 			&i.LikedAt,
 			&i.Name,
 			&i.LastName,
@@ -1026,6 +1038,26 @@ WHERE recipient_user_id = $1
 
 func (q *Queries) GetTotalUnreadCount(ctx context.Context, recipientUserID int32) (int64, error) {
 	row := q.db.QueryRow(ctx, getTotalUnreadCount, recipientUserID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const getUnseenLikeCount = `-- name: GetUnseenLikeCount :one
+SELECT COUNT(*)
+FROM likes l
+WHERE l.liked_user_id = $1 -- The user receiving the likes
+  AND l.is_seen = false
+  AND NOT EXISTS ( -- Ensure it's not a mutual like
+      SELECT 1
+      FROM likes l2
+      WHERE l2.liker_user_id = l.liked_user_id -- The recipient liked the liker back
+        AND l2.liked_user_id = l.liker_user_id
+  )
+`
+
+func (q *Queries) GetUnseenLikeCount(ctx context.Context, likedUserID int32) (int64, error) {
+	row := q.db.QueryRow(ctx, getUnseenLikeCount, likedUserID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err

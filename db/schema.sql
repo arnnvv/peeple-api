@@ -229,6 +229,7 @@ CREATE TABLE likes (
     content_identifier TEXT NOT NULL DEFAULT '0',
     comment TEXT CHECK (length(comment) <= 140),
     interaction_type like_interaction_type NOT NULL DEFAULT 'standard',
+    is_seen BOOLEAN DEFAULT false,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_like_item UNIQUE (liker_user_id, liked_user_id, content_type, content_identifier)
 );

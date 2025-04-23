@@ -73,7 +73,7 @@ func GetWhoLikedYouHandler(w http.ResponseWriter, r *http.Request) {
 		utils.RespondWithJSON(w, http.StatusUnauthorized, WhoLikedYouResponse{Success: false, Message: "Authentication required"})
 		return
 	}
-	likedUserID := int32(claims.UserID) // This is the user receiving the likes
+	likedUserID := int32(claims.UserID)
 
 	log.Printf("INFO: GetWhoLikedYouHandler: Fetching likers for user %d", likedUserID)
 
@@ -88,7 +88,7 @@ func GetWhoLikedYouHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("INFO: GetWhoLikedYouHandler: No likers found for user %d", likedUserID)
 		utils.RespondWithJSON(w, http.StatusOK, WhoLikedYouResponse{
 			Success:      true,
-			FullProfiles: []FullProfileLiker{}, // Ensure empty slices, not null
+			FullProfiles: []FullProfileLiker{},
 			OtherLikers:  []BasicProfileLiker{},
 		})
 		return
@@ -108,7 +108,7 @@ func GetWhoLikedYouHandler(w http.ResponseWriter, r *http.Request) {
 		isRose := basicInfo.InteractionType == migrations.LikeInteractionTypeRose
 		var commentPtr *string
 		if basicInfo.Comment.Valid {
-			commentPtr = &basicInfo.Comment.String // Assign address if valid
+			commentPtr = &basicInfo.Comment.String
 		}
 
 		likerName := buildFullName(basicInfo.Name, basicInfo.LastName)
@@ -127,7 +127,7 @@ func GetWhoLikedYouHandler(w http.ResponseWriter, r *http.Request) {
 					IsRose:             isRose,
 					LikedAt:            basicInfo.LikedAt,
 				})
-				continue // Skip adding to fullProfiles
+				continue
 			}
 
 			fullProfiles = append(fullProfiles, FullProfileLiker{

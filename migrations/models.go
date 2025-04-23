@@ -783,6 +783,7 @@ type Like struct {
 	ContentIdentifier string
 	Comment           pgtype.Text
 	InteractionType   LikeInteractionType
+	IsSeen            pgtype.Bool
 	CreatedAt         pgtype.Timestamptz
 }
 
