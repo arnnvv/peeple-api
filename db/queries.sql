@@ -387,22 +387,29 @@ SELECT
     target_user.name AS matched_user_name,
     target_user.last_name AS matched_user_last_name,
     target_user.media_urls AS matched_user_media_urls,
-    -- return an empty string '' if last_msg.message_text is NULL
     COALESCE(last_msg.message_text, '') AS last_message_text,
-    -- Keep last_msg.sent_at as is; pgtype.Timestamptz handles NULL correctly
+    last_msg.media_type AS last_message_media_type,
+    last_msg.media_url AS last_message_media_url,
     last_msg.sent_at AS last_message_sent_at,
-    -- Use COALESCE to return 0 if last_msg.sender_user_id is NULL.
-    -- IMPORTANT: Ensure 0 is not a valid user ID in your system, otherwise use -1 or another sentinel.
-    COALESCE(last_msg.sender_user_id, 0) AS last_message_sender_id
+    COALESCE(last_msg.sender_user_id, 0) AS last_message_sender_id,
+    (
+        SELECT COUNT(*)
+        FROM chat_messages cm_unread
+        WHERE cm_unread.recipient_user_id = l1.liker_user_id
+          AND cm_unread.sender_user_id = l1.liked_user_id
+          AND cm_unread.is_read = false
+    ) AS unread_message_count
 FROM
     likes l1
 JOIN
     users target_user ON l1.liked_user_id = target_user.id
 JOIN
-    likes l2 ON l1.liked_user_id = l2.liker_user_id AND l1.liker_user_id = l2.liked_user_id -- Mutual like condition
+    likes l2 ON l1.liked_user_id = l2.liker_user_id AND l1.liker_user_id = l2.liked_user_id
 LEFT JOIN LATERAL (
     SELECT
         cm.message_text,
+        cm.media_type,
+        cm.media_url,
         cm.sent_at,
         cm.sender_user_id
     FROM
