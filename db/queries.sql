@@ -321,19 +321,28 @@ RETURNING *;
 
 -- name: GetLikersForUser :many
 SELECT
+    l.id AS like_id,
     l.liker_user_id,
     l.comment,
     l.interaction_type,
+    l.is_seen,
     l.created_at as liked_at,
     u.name,
     u.last_name,
     u.media_urls
 FROM likes l
 JOIN users u ON l.liker_user_id = u.id
-WHERE l.liked_user_id = $1 -- The user receiving the likes (current user)
+WHERE l.liked_user_id = $1
+  AND NOT EXISTS (
+      SELECT 1
+      FROM likes l2
+      WHERE l2.liker_user_id = l.liked_user_id
+        AND l2.liked_user_id = l.liker_user_id
+  )
 ORDER BY
-    (l.interaction_type = 'rose') DESC, -- Roses first
-    l.created_at DESC;                  -- Then by time
+    (l.interaction_type = 'rose') DESC,
+    l.is_seen ASC,
+    l.created_at DESC;
 
 -- name: GetLikeDetails :one
 SELECT
@@ -447,3 +456,15 @@ SELECT COUNT(*)
 FROM chat_messages
 WHERE recipient_user_id = $1
   AND is_read = false;
+
+-- name: GetUnseenLikeCount :one
+SELECT COUNT(*)
+FROM likes l
+WHERE l.liked_user_id = $1 -- The user receiving the likes
+  AND l.is_seen = false
+  AND NOT EXISTS ( -- Ensure it's not a mutual like
+      SELECT 1
+      FROM likes l2
+      WHERE l2.liker_user_id = l.liked_user_id -- The recipient liked the liker back
+        AND l2.liked_user_id = l.liker_user_id
+  );
