@@ -13,12 +13,14 @@ import (
 )
 
 type MatchInfo struct {
-	MatchedUserID      int32      `json:"matched_user_id"`
-	Name               string     `json:"name"`
-	FirstProfilePicURL string     `json:"first_profile_pic_url"`
-	LastMessage        *string    `json:"last_message,omitempty"`
-	LastMessageSentAt  *time.Time `json:"last_message_sent_at,omitempty"`
-	// LastMessageSenderID *int32     `json:"last_message_sender_id,omitempty"`
+	MatchedUserID       int32      `json:"matched_user_id"`
+	Name                string     `json:"name"`
+	FirstProfilePicURL  string     `json:"first_profile_pic_url"`
+	LastMessage         *string    `json:"last_message,omitempty"`
+	LastMessageType     *string    `json:"last_message_type,omitempty"`
+	LastMessageMediaURL *string    `json:"last_message_media_url,omitempty"`
+	LastMessageSentAt   *time.Time `json:"last_message_sent_at,omitempty"`
+	UnreadMessageCount  int64      `json:"unread_message_count"`
 }
 
 type GetMatchesResponse struct {
@@ -62,33 +64,49 @@ func GetMatchesHandler(w http.ResponseWriter, r *http.Request) {
 
 	for _, dbMatch := range dbMatches {
 		match := MatchInfo{
-			MatchedUserID:      dbMatch.MatchedUserID,
-			Name:               buildFullName(dbMatch.MatchedUserName, dbMatch.MatchedUserLastName),
-			FirstProfilePicURL: getFirstMediaURL(dbMatch.MatchedUserMediaUrls),
-			LastMessage:        nil,
-			LastMessageSentAt:  nil,
-			// LastMessageSenderID: nil, // Initialize if added to MatchInfo
+			MatchedUserID:       dbMatch.MatchedUserID,
+			Name:                buildFullName(dbMatch.MatchedUserName, dbMatch.MatchedUserLastName),
+			FirstProfilePicURL:  getFirstMediaURL(dbMatch.MatchedUserMediaUrls),
+			UnreadMessageCount:  dbMatch.UnreadMessageCount, // Assign the count directly
+			LastMessage:         nil,
+			LastMessageType:     nil,
+			LastMessageMediaURL: nil,
+			LastMessageSentAt:   nil,
 		}
 
-		if dbMatch.LastMessageText != "" {
+		if dbMatch.LastMessageText != "" { // If text is not empty, it was likely a text message
 			messageText := dbMatch.LastMessageText
 			match.LastMessage = &messageText
+			messageType := "text" // Assume text if text content exists
+			match.LastMessageType = &messageType
+		} else if dbMatch.LastMessageMediaUrl.Valid { // If no text, check if media URL is valid
+			mediaUrl := dbMatch.LastMessageMediaUrl.String
+			match.LastMessageMediaURL = &mediaUrl
+			if dbMatch.LastMessageMediaType.Valid { // If media URL is valid, use the media type
+				mediaType := dbMatch.LastMessageMediaType.String
+				match.LastMessageType = &mediaType // e.g., "image/jpeg", "video/mp4"
+			} else {
+				// Fallback if URL exists but type doesn't (shouldn't happen with constraints)
+				unknownType := "media"
+				match.LastMessageType = &unknownType
+			}
 		}
+		// If both text and media are absent, LastMessageType remains nil
 
 		if dbMatch.LastMessageSentAt.Valid {
 			validTime := dbMatch.LastMessageSentAt.Time
 			match.LastMessageSentAt = &validTime
 		}
 
-		// if dbMatch.LastMessageSenderID != 0 { // If it's not the default 0 (assuming 0 is invalid ID)
-		//     senderID := dbMatch.LastMessageSenderID // Copy the value
-		//     match.LastMessageSenderID = &senderID   // Assign its address to the pointer
+		// if dbMatch.LastMessageSenderID != 0 {
+		//     senderID := dbMatch.LastMessageSenderID
+		//     match.LastMessageSenderID = &senderID
 		// }
 
 		responseMatches = append(responseMatches, match)
 	}
 
-	log.Printf("INFO: GetMatchesHandler: Found %d matches for user %d", len(responseMatches), requestingUserID)
+	log.Printf("INFO: GetMatchesHandler: Found %d matches for user %d, processed with last message details and unread counts.", len(responseMatches), requestingUserID)
 
 	utils.RespondWithJSON(w, http.StatusOK, GetMatchesResponse{
 		Success: true,
