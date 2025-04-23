@@ -125,6 +125,27 @@ func (q *Queries) CheckLikeExists(ctx context.Context, arg CheckLikeExistsParams
 	return exists, err
 }
 
+const checkLikeExistsForRecipient = `-- name: CheckLikeExistsForRecipient :one
+SELECT EXISTS (
+    SELECT 1
+    FROM likes
+    WHERE id = $1
+      AND liked_user_id = $2
+)
+`
+
+type CheckLikeExistsForRecipientParams struct {
+	ID          int32
+	LikedUserID int32
+}
+
+func (q *Queries) CheckLikeExistsForRecipient(ctx context.Context, arg CheckLikeExistsForRecipientParams) (bool, error) {
+	row := q.db.QueryRow(ctx, checkLikeExistsForRecipient, arg.ID, arg.LikedUserID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const checkMutualLikeExists = `-- name: CheckMutualLikeExists :one
 SELECT EXISTS (SELECT 1 FROM likes l1 WHERE l1.liker_user_id = $1 AND l1.liked_user_id = $2)
    AND EXISTS (SELECT 1 FROM likes l2 WHERE l2.liker_user_id = $2 AND l2.liked_user_id = $1)
@@ -1340,6 +1361,23 @@ VALUES ($1)
 func (q *Queries) LogAppOpen(ctx context.Context, userID int32) error {
 	_, err := q.db.Exec(ctx, logAppOpen, userID)
 	return err
+}
+
+const markLikesAsSeenUntil = `-- name: MarkLikesAsSeenUntil :execresult
+UPDATE likes
+SET is_seen = true
+WHERE liked_user_id = $1
+  AND id <= $2
+  AND is_seen = false
+`
+
+type MarkLikesAsSeenUntilParams struct {
+	LikedUserID int32
+	ID          int32
+}
+
+func (q *Queries) MarkLikesAsSeenUntil(ctx context.Context, arg MarkLikesAsSeenUntilParams) (pgconn.CommandTag, error) {
+	return q.db.Exec(ctx, markLikesAsSeenUntil, arg.LikedUserID, arg.ID)
 }
 
 const markMessagesAsReadUntil = `-- name: MarkMessagesAsReadUntil :execresult

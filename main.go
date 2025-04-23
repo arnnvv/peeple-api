@@ -126,6 +126,7 @@ func setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/unmatch", authMiddleware(handlers.UnmatchHandler))
 	mux.HandleFunc("/api/report", authMiddleware(handlers.ReportHandler))
 	mux.HandleFunc("/api/likes/received", authMiddleware(handlers.GetWhoLikedYouHandler))
+	mux.HandleFunc("/api/likes/seen-until", authMiddleware(handlers.MarkLikesSeenUntilHandler))
 	mux.HandleFunc("/api/liker-profile/", authMiddleware(handlers.GetLikerProfileHandler))
 	mux.HandleFunc("/api/matches", authMiddleware(handlers.GetMatchesHandler))
 	mux.HandleFunc("/api/iap/verify", authMiddleware(handlers.VerifyPurchaseHandler))
