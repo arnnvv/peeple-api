@@ -354,10 +354,13 @@ WHERE (sender_user_id = $1 AND recipient_user_id = $2)
    OR (sender_user_id = $2 AND recipient_user_id = $1)
 ORDER BY sent_at ASC;
 
--- name: MarkMessagesAsRead :exec
+-- name: MarkMessagesAsReadUntil :execresult
 UPDATE chat_messages
 SET is_read = true
-WHERE recipient_user_id = $1 AND sender_user_id = $2 AND is_read = false;
+WHERE recipient_user_id = $1
+  AND sender_user_id = $2
+  AND id <= $3
+  AND is_read = false;
 
 -- name: CheckMutualLikeExists :one
 SELECT EXISTS (SELECT 1 FROM likes l1 WHERE l1.liker_user_id = $1 AND l1.liked_user_id = $2)

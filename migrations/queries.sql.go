@@ -8,6 +8,7 @@ package migrations
 import (
 	"context"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -1262,20 +1263,23 @@ func (q *Queries) LogAppOpen(ctx context.Context, userID int32) error {
 	return err
 }
 
-const markMessagesAsRead = `-- name: MarkMessagesAsRead :exec
+const markMessagesAsReadUntil = `-- name: MarkMessagesAsReadUntil :execresult
 UPDATE chat_messages
 SET is_read = true
-WHERE recipient_user_id = $1 AND sender_user_id = $2 AND is_read = false
+WHERE recipient_user_id = $1
+  AND sender_user_id = $2
+  AND id <= $3
+  AND is_read = false
 `
 
-type MarkMessagesAsReadParams struct {
+type MarkMessagesAsReadUntilParams struct {
 	RecipientUserID int32
 	SenderUserID    int32
+	ID              int64
 }
 
-func (q *Queries) MarkMessagesAsRead(ctx context.Context, arg MarkMessagesAsReadParams) error {
-	_, err := q.db.Exec(ctx, markMessagesAsRead, arg.RecipientUserID, arg.SenderUserID)
-	return err
+func (q *Queries) MarkMessagesAsReadUntil(ctx context.Context, arg MarkMessagesAsReadUntilParams) (pgconn.CommandTag, error) {
+	return q.db.Exec(ctx, markMessagesAsReadUntil, arg.RecipientUserID, arg.SenderUserID, arg.ID)
 }
 
 const updateAudioPrompt = `-- name: UpdateAudioPrompt :one

@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"log"
@@ -122,18 +121,4 @@ func GetConversationHandler(w http.ResponseWriter, r *http.Request) {
 		Success:  true,
 		Messages: messages,
 	})
-
-	go func() {
-		bgCtx := context.Background()
-		markReadParams := migrations.MarkMessagesAsReadParams{
-			RecipientUserID: requestingUserID,
-			SenderUserID:    otherUserID,
-		}
-		err := queries.MarkMessagesAsRead(bgCtx, markReadParams)
-		if err != nil {
-			log.Printf("WARN: GetConversationHandler: Failed to mark messages as read in background between %d and %d: %v", otherUserID, requestingUserID, err)
-		} else {
-			log.Printf("INFO: GetConversationHandler: Marked messages as read in background from %d to %d", otherUserID, requestingUserID)
-		}
-	}()
 }
