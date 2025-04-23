@@ -1011,6 +1011,20 @@ func (q *Queries) GetQuickFeed(ctx context.Context, arg GetQuickFeedParams) ([]G
 	return items, nil
 }
 
+const getTotalUnreadCount = `-- name: GetTotalUnreadCount :one
+SELECT COUNT(*)
+FROM chat_messages
+WHERE recipient_user_id = $1
+  AND is_read = false
+`
+
+func (q *Queries) GetTotalUnreadCount(ctx context.Context, recipientUserID int32) (int64, error) {
+	row := q.db.QueryRow(ctx, getTotalUnreadCount, recipientUserID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const getUserAudioPrompt = `-- name: GetUserAudioPrompt :one
 SELECT id, audio_prompt_question, audio_prompt_answer
 FROM users

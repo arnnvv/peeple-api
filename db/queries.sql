@@ -432,3 +432,9 @@ SELECT EXISTS (
     SELECT 1 FROM likes
     WHERE liker_user_id = $1 AND liked_user_id = $2
 );
+
+-- name: GetTotalUnreadCount :one
+SELECT COUNT(*)
+FROM chat_messages
+WHERE recipient_user_id = $1
+  AND is_read = false;
