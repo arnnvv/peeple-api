@@ -367,10 +367,35 @@ INSERT INTO chat_messages (
 ) RETURNING *;
 
 -- name: GetConversationMessages :many
-SELECT * FROM chat_messages
-WHERE (sender_user_id = $1 AND recipient_user_id = $2)
-   OR (sender_user_id = $2 AND recipient_user_id = $1)
-ORDER BY sent_at ASC;
+WITH MessageReactionsAgg AS (
+    SELECT
+        message_id,
+        jsonb_object_agg(emoji, count) FILTER (WHERE emoji IS NOT NULL) AS reactions_summary_json
+     FROM (
+        SELECT message_id, emoji, COUNT(user_id) as count
+        FROM message_reactions
+        WHERE message_id IN (
+            SELECT id FROM chat_messages
+            WHERE (sender_user_id = $1 AND recipient_user_id = $2)
+               OR (sender_user_id = $2 AND recipient_user_id = $1)
+        )
+        GROUP BY message_id, emoji
+     ) AS grouped_reactions
+    GROUP BY message_id
+)
+SELECT
+    cm.id, cm.sender_user_id, cm.recipient_user_id, cm.message_text, cm.media_url, cm.media_type, cm.sent_at, cm.is_read,
+    COALESCE(mra.reactions_summary_json, '{}'::jsonb) AS reactions_data
+FROM chat_messages cm
+LEFT JOIN MessageReactionsAgg mra ON cm.id = mra.message_id
+WHERE (cm.sender_user_id = $1 AND cm.recipient_user_id = $2)
+   OR (cm.sender_user_id = $2 AND cm.recipient_user_id = $1)
+ORDER BY cm.sent_at ASC;
+
+-- name: GetUserReactionsForMessages :many
+SELECT message_id, emoji
+FROM message_reactions
+WHERE user_id = $1 AND message_id = ANY($2::bigint[]);
 
 -- name: MarkMessagesAsReadUntil :execresult
 UPDATE chat_messages
@@ -398,52 +423,6 @@ INSERT INTO reports (
     $1, $2, $3
 )
 RETURNING id, reporter_user_id, reported_user_id, reason, created_at;
-
--- name: GetMatchesWithLastMessage :many
-SELECT
-    target_user.id AS matched_user_id,
-    target_user.name AS matched_user_name,
-    target_user.last_name AS matched_user_last_name,
-    target_user.media_urls AS matched_user_media_urls,
-    COALESCE(last_msg.message_text, '') AS last_message_text,
-    last_msg.media_type AS last_message_media_type,
-    last_msg.media_url AS last_message_media_url,
-    last_msg.sent_at AS last_message_sent_at,
-    COALESCE(last_msg.sender_user_id, 0) AS last_message_sender_id,
-    (
-        SELECT COUNT(*)
-        FROM chat_messages cm_unread
-        WHERE cm_unread.recipient_user_id = l1.liker_user_id
-          AND cm_unread.sender_user_id = l1.liked_user_id
-          AND cm_unread.is_read = false
-    ) AS unread_message_count
-FROM
-    likes l1
-JOIN
-    users target_user ON l1.liked_user_id = target_user.id
-JOIN
-    likes l2 ON l1.liked_user_id = l2.liker_user_id AND l1.liker_user_id = l2.liked_user_id
-LEFT JOIN LATERAL (
-    SELECT
-        cm.message_text,
-        cm.media_type,
-        cm.media_url,
-        cm.sent_at,
-        cm.sender_user_id
-    FROM
-        chat_messages cm
-    WHERE
-        (cm.sender_user_id = l1.liker_user_id AND cm.recipient_user_id = l1.liked_user_id)
-        OR (cm.sender_user_id = l1.liked_user_id AND cm.recipient_user_id = l1.liker_user_id)
-    ORDER BY
-        cm.sent_at DESC
-    LIMIT 1
-) last_msg ON true
-WHERE
-    l1.liker_user_id = $1
-ORDER BY
-    last_msg.sent_at DESC NULLS LAST,
-    target_user.id;
 
 -- name: CheckLikeExists :one
 SELECT EXISTS (
@@ -503,11 +482,6 @@ FROM message_reactions
 WHERE message_id = $1 AND user_id = $2
 LIMIT 1;
 
--- name: GetUserReactionsForMessages :many
-SELECT message_id, emoji
-FROM message_reactions
-WHERE user_id = $1 AND message_id = ANY($2::bigint[]);
-
 -- name: GetMessageSenderRecipient :one
 SELECT sender_user_id, recipient_user_id
 FROM chat_messages
@@ -522,3 +496,65 @@ WHERE is_read = false
        (recipient_user_id = $1 AND sender_user_id = $2)
     OR (recipient_user_id = $2 AND sender_user_id = $1)
   );
+
+-- name: GetMatchesWithLastEvent :many
+SELECT
+    target_user.id AS matched_user_id,
+    target_user.name AS matched_user_name,
+    target_user.last_name AS matched_user_last_name,
+    target_user.media_urls AS matched_user_media_urls,
+    last_event.event_at AS last_event_timestamp,
+    last_event.event_user_id AS last_event_user_id,
+    last_event.event_type AS last_event_type,
+    last_event.event_content AS last_event_content,
+    last_event.event_extra AS last_event_extra,
+    (
+        SELECT COUNT(*)
+        FROM chat_messages cm_unread
+        WHERE cm_unread.recipient_user_id = l1.liker_user_id
+          AND cm_unread.sender_user_id = l1.liked_user_id
+          AND cm_unread.is_read = false
+    ) AS unread_message_count
+FROM
+    likes l1
+JOIN
+    users target_user ON l1.liked_user_id = target_user.id
+JOIN
+    likes l2 ON l1.liked_user_id = l2.liker_user_id
+              AND l1.liker_user_id = l2.liked_user_id
+LEFT JOIN LATERAL (
+    (
+        SELECT
+            cm.sent_at AS event_at,
+            cm.sender_user_id AS event_user_id,
+            CASE WHEN cm.message_text IS NOT NULL THEN 'text' ELSE 'media' END AS event_type,
+            COALESCE(cm.message_text, cm.media_type) AS event_content,
+            cm.media_url AS event_extra
+        FROM chat_messages cm
+        WHERE (cm.sender_user_id = l1.liker_user_id AND cm.recipient_user_id = l1.liked_user_id)
+           OR (cm.sender_user_id = l1.liked_user_id AND cm.recipient_user_id = l1.liker_user_id)
+
+        UNION ALL
+
+        SELECT
+            mr.updated_at AS event_at,
+            mr.user_id AS event_user_id,
+            'reaction' AS event_type,
+            mr.emoji AS event_content,
+            NULL AS event_extra
+        FROM message_reactions mr
+        JOIN chat_messages cm_react ON mr.message_id = cm_react.id
+        WHERE (mr.user_id = l1.liker_user_id OR mr.user_id = l1.liked_user_id)
+          AND (
+                  (cm_react.sender_user_id = l1.liker_user_id AND cm_react.recipient_user_id = l1.liked_user_id)
+               OR (cm_react.sender_user_id = l1.liked_user_id AND cm_react.recipient_user_id = l1.liker_user_id)
+              )
+    )
+    ORDER BY event_at DESC
+    LIMIT 1
+) AS last_event ON true
+WHERE
+    l1.liker_user_id = $1
+ORDER BY
+    last_event_timestamp DESC NULLS LAST,
+    target_user.id;
