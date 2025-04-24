@@ -787,6 +787,15 @@ type Like struct {
 	CreatedAt         pgtype.Timestamptz
 }
 
+type MessageReaction struct {
+	ID        int64
+	MessageID int64
+	UserID    int32
+	Emoji     string
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
+}
+
 type MyTypePrompt struct {
 	ID       int32
 	UserID   int32

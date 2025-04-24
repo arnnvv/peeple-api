@@ -446,6 +446,21 @@ func (q *Queries) DeleteLikesBetweenUsers(ctx context.Context, arg DeleteLikesBe
 	return err
 }
 
+const deleteMessageReactionByUser = `-- name: DeleteMessageReactionByUser :execresult
+DELETE FROM message_reactions
+WHERE message_id = $1
+  AND user_id = $2
+`
+
+type DeleteMessageReactionByUserParams struct {
+	MessageID int64
+	UserID    int32
+}
+
+func (q *Queries) DeleteMessageReactionByUser(ctx context.Context, arg DeleteMessageReactionByUserParams) (pgconn.CommandTag, error) {
+	return q.db.Exec(ctx, deleteMessageReactionByUser, arg.MessageID, arg.UserID)
+}
+
 const deleteUserDateVibesPrompts = `-- name: DeleteUserDateVibesPrompts :exec
 DELETE FROM date_vibes_prompts WHERE user_id = $1
 `
@@ -888,6 +903,25 @@ func (q *Queries) GetMatchesWithLastMessage(ctx context.Context, likerUserID int
 	return items, nil
 }
 
+const getMessageSenderRecipient = `-- name: GetMessageSenderRecipient :one
+SELECT sender_user_id, recipient_user_id
+FROM chat_messages
+WHERE id = $1
+LIMIT 1
+`
+
+type GetMessageSenderRecipientRow struct {
+	SenderUserID    int32
+	RecipientUserID int32
+}
+
+func (q *Queries) GetMessageSenderRecipient(ctx context.Context, id int64) (GetMessageSenderRecipientRow, error) {
+	row := q.db.QueryRow(ctx, getMessageSenderRecipient, id)
+	var i GetMessageSenderRecipientRow
+	err := row.Scan(&i.SenderUserID, &i.RecipientUserID)
+	return i, err
+}
+
 const getPendingVerificationUsers = `-- name: GetPendingVerificationUsers :many
 SELECT id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until, last_online FROM users
 WHERE verification_status = $1
@@ -1048,6 +1082,32 @@ func (q *Queries) GetQuickFeed(ctx context.Context, arg GetQuickFeedParams) ([]G
 		return nil, err
 	}
 	return items, nil
+}
+
+const getSingleReactionByUser = `-- name: GetSingleReactionByUser :one
+SELECT id, message_id, user_id, emoji, created_at, updated_at
+FROM message_reactions
+WHERE message_id = $1 AND user_id = $2
+LIMIT 1
+`
+
+type GetSingleReactionByUserParams struct {
+	MessageID int64
+	UserID    int32
+}
+
+func (q *Queries) GetSingleReactionByUser(ctx context.Context, arg GetSingleReactionByUserParams) (MessageReaction, error) {
+	row := q.db.QueryRow(ctx, getSingleReactionByUser, arg.MessageID, arg.UserID)
+	var i MessageReaction
+	err := row.Scan(
+		&i.ID,
+		&i.MessageID,
+		&i.UserID,
+		&i.Emoji,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const getTotalUnreadCount = `-- name: GetTotalUnreadCount :one
@@ -1314,6 +1374,42 @@ func (q *Queries) GetUserMyTypePrompts(ctx context.Context, userID int32) ([]MyT
 			&i.Question,
 			&i.Answer,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getUserReactionsForMessages = `-- name: GetUserReactionsForMessages :many
+SELECT message_id, emoji
+FROM message_reactions
+WHERE user_id = $1 AND message_id = ANY($2::bigint[])
+`
+
+type GetUserReactionsForMessagesParams struct {
+	UserID  int32
+	Column2 []int64
+}
+
+type GetUserReactionsForMessagesRow struct {
+	MessageID int64
+	Emoji     string
+}
+
+func (q *Queries) GetUserReactionsForMessages(ctx context.Context, arg GetUserReactionsForMessagesParams) ([]GetUserReactionsForMessagesRow, error) {
+	rows, err := q.db.Query(ctx, getUserReactionsForMessages, arg.UserID, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetUserReactionsForMessagesRow
+	for rows.Next() {
+		var i GetUserReactionsForMessagesRow
+		if err := rows.Scan(&i.MessageID, &i.Emoji); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1727,6 +1823,35 @@ func (q *Queries) UpdateUserVerificationStatus(ctx context.Context, arg UpdateUs
 		&i.AudioPromptAnswer,
 		&i.SpotlightActiveUntil,
 		&i.LastOnline,
+	)
+	return i, err
+}
+
+const upsertMessageReaction = `-- name: UpsertMessageReaction :one
+INSERT INTO message_reactions (message_id, user_id, emoji)
+VALUES ($1, $2, $3)
+ON CONFLICT (message_id, user_id) DO UPDATE SET
+    emoji = EXCLUDED.emoji,
+    updated_at = NOW()
+RETURNING id, message_id, user_id, emoji, created_at, updated_at
+`
+
+type UpsertMessageReactionParams struct {
+	MessageID int64
+	UserID    int32
+	Emoji     string
+}
+
+func (q *Queries) UpsertMessageReaction(ctx context.Context, arg UpsertMessageReactionParams) (MessageReaction, error) {
+	row := q.db.QueryRow(ctx, upsertMessageReaction, arg.MessageID, arg.UserID, arg.Emoji)
+	var i MessageReaction
+	err := row.Scan(
+		&i.ID,
+		&i.MessageID,
+		&i.UserID,
+		&i.Emoji,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

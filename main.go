@@ -133,6 +133,7 @@ func setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/chat", authMiddleware(handlers.ChatHandler))
 	mux.HandleFunc("/api/conversation", authMiddleware(handlers.GetConversationHandler))
 	mux.HandleFunc("/api/chat/upload", authMiddleware(handlers.GenerateChatMediaPresignedURL))
+	mux.HandleFunc("/api/chat/react", authMiddleware(handlers.ToggleReplaceReactionHandler))
 	mux.HandleFunc("/api/chat/mark-read-until", authMiddleware(handlers.MarkReadUntilHandler))
 	mux.HandleFunc("/api/unread-chat-count", authMiddleware(handlers.GetUnreadCountHandler))
 	mux.HandleFunc("/api/me/update-online", authMiddleware(handlers.UpdateOnlineStatusHandler))
