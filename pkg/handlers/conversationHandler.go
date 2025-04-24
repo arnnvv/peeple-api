@@ -26,6 +26,13 @@ type GetConversationResponse struct {
 	Messages []ConversationMessageResponse `json:"messages"`
 }
 
+type RepliedToInfo struct {
+	MessageID               int64   `json:"message_id"`
+	SenderID                int32   `json:"sender_id"`
+	TextSnippet             *string `json:"text_snippet,omitempty"`
+	RepliedMessageMediaType *string `json:"media_type,omitempty"`
+}
+
 type ConversationMessageResponse struct {
 	ID                  int64              `json:"id"`
 	SenderUserID        int32              `json:"sender_user_id"`
@@ -37,6 +44,7 @@ type ConversationMessageResponse struct {
 	IsRead              bool               `json:"is_read"`
 	Reactions           json.RawMessage    `json:"reactions"`
 	CurrentUserReaction *string            `json:"current_user_reaction,omitempty"`
+	ReplyTo             *RepliedToInfo     `json:"reply_to,omitempty"`
 }
 
 func GetConversationHandler(w http.ResponseWriter, r *http.Request) {
@@ -70,12 +78,8 @@ func GetConversationHandler(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	otherUserID := req.OtherUserID
 
-	if otherUserID <= 0 {
-		utils.RespondWithJSON(w, http.StatusBadRequest, GetConversationResponse{Success: false, Message: "Valid other_user_id is required in request body"})
-		return
-	}
-	if otherUserID == requestingUserID {
-		utils.RespondWithJSON(w, http.StatusBadRequest, GetConversationResponse{Success: false, Message: "Cannot fetch conversation with yourself"})
+	if otherUserID <= 0 || otherUserID == requestingUserID {
+		utils.RespondWithJSON(w, http.StatusBadRequest, GetConversationResponse{Success: false, Message: "Valid other_user_id (different from self) is required"})
 		return
 	}
 
@@ -90,7 +94,6 @@ func GetConversationHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("INFO: GetConversationHandler: Checking for mutual like between %d and %d", requestingUserID, otherUserID)
 	mutualLikeParams := migrations.CheckMutualLikeExistsParams{LikerUserID: requestingUserID, LikedUserID: otherUserID}
 	mutualLikeResult, checkErr := queries.CheckMutualLikeExists(ctx, mutualLikeParams)
 	if checkErr != nil {
@@ -99,7 +102,6 @@ func GetConversationHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !mutualLikeResult.Valid || !mutualLikeResult.Bool {
-		log.Printf("INFO: GetConversationHandler: No mutual like found between %d and %d. Preventing chat fetch.", requestingUserID, otherUserID)
 		utils.RespondWithJSON(w, http.StatusForbidden, GetConversationResponse{
 			Success:  false,
 			Message:  "You can only view conversations with users you have matched with.",
@@ -107,16 +109,17 @@ func GetConversationHandler(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	log.Printf("INFO: GetConversationHandler: Mutual like confirmed. Fetching conversation between %d and %d with reactions", requestingUserID, otherUserID)
+
+	log.Printf("INFO: GetConversationHandler: Fetching conversation between %d and %d", requestingUserID, otherUserID)
 
 	params := migrations.GetConversationMessagesParams{
 		SenderUserID:    requestingUserID,
 		RecipientUserID: otherUserID,
 	}
-
 	dbMessages, err := queries.GetConversationMessages(ctx, params)
+
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		log.Printf("ERROR: GetConversationHandler: Failed to fetch messages between %d and %d: %v", requestingUserID, otherUserID, err)
+		log.Printf("ERROR: GetConversationHandler: queries.GetConversationMessages failed: %v", err)
 		utils.RespondWithJSON(w, http.StatusInternalServerError, GetConversationResponse{Success: false, Message: "Error retrieving conversation"})
 		return
 	}
@@ -124,7 +127,7 @@ func GetConversationHandler(w http.ResponseWriter, r *http.Request) {
 	responseMessages := make([]ConversationMessageResponse, 0, len(dbMessages))
 	var lastMessageID int64 = 0
 
-	if dbMessages != nil && len(dbMessages) > 0 {
+	if len(dbMessages) > 0 {
 		userReactionsMap, userReactionsErr := fetchUserReactionsForMessages(ctx, queries, dbMessages, requestingUserID)
 		if userReactionsErr != nil {
 			log.Printf("WARN: GetConversationHandler: Failed to pre-fetch user reactions for user %d: %v. Proceeding without CurrentUserReaction.", requestingUserID, userReactionsErr)
@@ -139,8 +142,32 @@ func GetConversationHandler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			reactionsJSON := msg.ReactionsData
-			if reactionsJSON == nil || len(reactionsJSON) == 0 || string(reactionsJSON) == "null" {
+			if len(reactionsJSON) == 0 || string(reactionsJSON) == "null" {
 				reactionsJSON = []byte("{}")
+			}
+
+			var replyInfo *RepliedToInfo = nil
+			if msg.ReplyToMessageID.Valid && msg.RepliedMessageSenderID.Valid {
+				replyInfo = &RepliedToInfo{
+					MessageID:               msg.ReplyToMessageID.Int64,
+					SenderID:                msg.RepliedMessageSenderID.Int32,
+					TextSnippet:             nil,
+					RepliedMessageMediaType: nil,
+				}
+
+				if snippetValue := msg.RepliedMessageTextSnippet; snippetValue != nil {
+					snippetStr, ok := snippetValue.(string)
+					if ok && snippetStr != "" {
+						replyInfo.TextSnippet = &snippetStr
+					} else if !ok {
+						log.Printf("WARN: Unexpected type for RepliedMessageTextSnippet: %T, value: %v", snippetValue, snippetValue)
+					}
+				}
+
+				if msg.RepliedMessageMediaType.Valid {
+					mediaType := msg.RepliedMessageMediaType.String
+					replyInfo.RepliedMessageMediaType = &mediaType
+				}
 			}
 
 			responseMsg := ConversationMessageResponse{
@@ -154,6 +181,7 @@ func GetConversationHandler(w http.ResponseWriter, r *http.Request) {
 				IsRead:              msg.IsRead,
 				Reactions:           json.RawMessage(reactionsJSON),
 				CurrentUserReaction: currentUserReaction,
+				ReplyTo:             replyInfo,
 			}
 			responseMessages = append(responseMessages, responseMsg)
 
@@ -165,7 +193,7 @@ func GetConversationHandler(w http.ResponseWriter, r *http.Request) {
 		responseMessages = []ConversationMessageResponse{}
 	}
 
-	log.Printf("INFO: GetConversationHandler: Found %d total messages for conversation between %d and %d. Last message ID in batch: %d", len(responseMessages), requestingUserID, otherUserID, lastMessageID)
+	log.Printf("INFO: GetConversationHandler: Successfully processed %d messages for conversation between %d and %d.", len(responseMessages), requestingUserID, otherUserID)
 
 	utils.RespondWithJSON(w, http.StatusOK, GetConversationResponse{
 		Success:  true,
@@ -177,22 +205,18 @@ func GetConversationHandler(w http.ResponseWriter, r *http.Request) {
 			bgCtx := context.Background()
 			queriesBG, errDbBG := db.GetDB()
 			if errDbBG != nil || queriesBG == nil {
-				log.Printf("WARN: GetConversationHandler Goroutine: Could not get DB for marking messages read (User %d from %d)", requestingUserID, otherUserID)
 				return
 			}
-
 			markReadParams := migrations.MarkMessagesAsReadUntilParams{
 				RecipientUserID: requestingUserID,
 				SenderUserID:    otherUserID,
 				ID:              lastID,
 			}
-
-			cmdTag, errMark := queriesBG.MarkMessagesAsReadUntil(bgCtx, markReadParams)
-
+			_, errMark := queriesBG.MarkMessagesAsReadUntil(bgCtx, markReadParams)
 			if errMark != nil {
-				log.Printf("WARN: GetConversationHandler Goroutine: Failed to mark messages as read until ID %d (from %d to %d): %v", lastID, otherUserID, requestingUserID, errMark)
+				log.Printf("WARN: GetConversationHandler Goroutine: Failed mark read until ID %d: %v", lastID, errMark)
 			} else {
-				log.Printf("INFO: GetConversationHandler Goroutine: Marked %d messages as read until ID %d (from %d to %d)", cmdTag.RowsAffected(), lastID, otherUserID, requestingUserID)
+				log.Printf("INFO: GetConversationHandler Goroutine: Marked messages read until ID %d", lastID)
 			}
 		}(lastMessageID)
 	}
@@ -219,7 +243,6 @@ func fetchUserReactionsForMessages(ctx context.Context, queries *migrations.Quer
 		}
 		return nil, fmt.Errorf("failed to execute GetUserReactionsForMessages: %w", err)
 	}
-
 	resultMap := make(map[int64]string, len(reactions))
 	for _, reaction := range reactions {
 		resultMap[reaction.MessageID] = reaction.Emoji

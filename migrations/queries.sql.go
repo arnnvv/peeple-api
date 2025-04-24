@@ -195,21 +195,22 @@ INSERT INTO chat_messages (
     recipient_user_id,
     message_text,
     media_url,
-    media_type
+    media_type,
+    reply_to_message_id
 ) VALUES (
-    $1, $2, $3, $4, $5
-) RETURNING id, sender_user_id, recipient_user_id, message_text, media_url, media_type, sent_at, is_read
+    $1, $2, $3, $4, $5, $6
+) RETURNING id, sender_user_id, recipient_user_id, message_text, media_url, media_type, sent_at, is_read, reply_to_message_id
 `
 
 type CreateChatMessageParams struct {
-	SenderUserID    int32
-	RecipientUserID int32
-	MessageText     pgtype.Text
-	MediaUrl        pgtype.Text
-	MediaType       pgtype.Text
+	SenderUserID     int32
+	RecipientUserID  int32
+	MessageText      pgtype.Text
+	MediaUrl         pgtype.Text
+	MediaType        pgtype.Text
+	ReplyToMessageID pgtype.Int8
 }
 
-// Chat Queries (from partner branch) --
 func (q *Queries) CreateChatMessage(ctx context.Context, arg CreateChatMessageParams) (ChatMessage, error) {
 	row := q.db.QueryRow(ctx, createChatMessage,
 		arg.SenderUserID,
@@ -217,6 +218,7 @@ func (q *Queries) CreateChatMessage(ctx context.Context, arg CreateChatMessagePa
 		arg.MessageText,
 		arg.MediaUrl,
 		arg.MediaType,
+		arg.ReplyToMessageID,
 	)
 	var i ChatMessage
 	err := row.Scan(
@@ -228,6 +230,7 @@ func (q *Queries) CreateChatMessage(ctx context.Context, arg CreateChatMessagePa
 		&i.MediaType,
 		&i.SentAt,
 		&i.IsRead,
+		&i.ReplyToMessageID,
 	)
 	return i, err
 }
@@ -543,9 +546,14 @@ WITH MessageReactionsAgg AS (
 )
 SELECT
     cm.id, cm.sender_user_id, cm.recipient_user_id, cm.message_text, cm.media_url, cm.media_type, cm.sent_at, cm.is_read,
-    COALESCE(mra.reactions_summary_json, '{}'::jsonb) AS reactions_data
+    COALESCE(mra.reactions_summary_json, '{}'::jsonb) AS reactions_data,
+    cm.reply_to_message_id,
+    replied_msg.sender_user_id AS replied_message_sender_id,
+    COALESCE(substring(replied_msg.message_text for 50)::TEXT, '') AS replied_message_text_snippet,
+    replied_msg.media_type AS replied_message_media_type
 FROM chat_messages cm
 LEFT JOIN MessageReactionsAgg mra ON cm.id = mra.message_id
+LEFT JOIN chat_messages replied_msg ON cm.reply_to_message_id = replied_msg.id
 WHERE (cm.sender_user_id = $1 AND cm.recipient_user_id = $2)
    OR (cm.sender_user_id = $2 AND cm.recipient_user_id = $1)
 ORDER BY cm.sent_at ASC
@@ -557,15 +565,19 @@ type GetConversationMessagesParams struct {
 }
 
 type GetConversationMessagesRow struct {
-	ID              int64
-	SenderUserID    int32
-	RecipientUserID int32
-	MessageText     pgtype.Text
-	MediaUrl        pgtype.Text
-	MediaType       pgtype.Text
-	SentAt          pgtype.Timestamptz
-	IsRead          bool
-	ReactionsData   []byte
+	ID                        int64
+	SenderUserID              int32
+	RecipientUserID           int32
+	MessageText               pgtype.Text
+	MediaUrl                  pgtype.Text
+	MediaType                 pgtype.Text
+	SentAt                    pgtype.Timestamptz
+	IsRead                    bool
+	ReactionsData             []byte
+	ReplyToMessageID          pgtype.Int8
+	RepliedMessageSenderID    pgtype.Int4
+	RepliedMessageTextSnippet interface{}
+	RepliedMessageMediaType   pgtype.Text
 }
 
 func (q *Queries) GetConversationMessages(ctx context.Context, arg GetConversationMessagesParams) ([]GetConversationMessagesRow, error) {
@@ -587,6 +599,10 @@ func (q *Queries) GetConversationMessages(ctx context.Context, arg GetConversati
 			&i.SentAt,
 			&i.IsRead,
 			&i.ReactionsData,
+			&i.ReplyToMessageID,
+			&i.RepliedMessageSenderID,
+			&i.RepliedMessageTextSnippet,
+			&i.RepliedMessageMediaType,
 		); err != nil {
 			return nil, err
 		}

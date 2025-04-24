@@ -266,6 +266,7 @@ CREATE TABLE chat_messages (
     media_type TEXT,
     sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     is_read BOOLEAN NOT NULL DEFAULT false,
+    reply_to_message_id BIGINT NULL REFERENCES chat_messages(id) ON DELETE SET NULL,
     CONSTRAINT chk_sender_recipient_different CHECK (sender_user_id <> recipient_user_id),
     CONSTRAINT chk_message_content CHECK (
     (
@@ -283,6 +284,7 @@ CREATE TABLE chat_messages (
   )
 );
 
+CREATE INDEX idx_chat_messages_reply_to ON chat_messages (reply_to_message_id) WHERE reply_to_message_id IS NOT NULL;
 CREATE INDEX idx_chat_messages_conversation ON chat_messages (sender_user_id, recipient_user_id, sent_at DESC);
 CREATE INDEX idx_chat_messages_recipient_time ON chat_messages (recipient_user_id, sent_at DESC);
 CREATE INDEX idx_chat_messages_recipient_unread ON chat_messages (recipient_user_id, is_read) WHERE is_read = false;

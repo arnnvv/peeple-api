@@ -353,17 +353,16 @@ WHERE liker_user_id = $1 -- The user who sent the like
 AND liked_user_id = $2   -- The user who received the like (current user)
 LIMIT 1;
 
-
--- Chat Queries (from partner branch) --
 -- name: CreateChatMessage :one
 INSERT INTO chat_messages (
     sender_user_id,
     recipient_user_id,
     message_text,
     media_url,
-    media_type
+    media_type,
+    reply_to_message_id
 ) VALUES (
-    $1, $2, $3, $4, $5
+    $1, $2, $3, $4, $5, $6
 ) RETURNING *;
 
 -- name: GetConversationMessages :many
@@ -385,9 +384,14 @@ WITH MessageReactionsAgg AS (
 )
 SELECT
     cm.id, cm.sender_user_id, cm.recipient_user_id, cm.message_text, cm.media_url, cm.media_type, cm.sent_at, cm.is_read,
-    COALESCE(mra.reactions_summary_json, '{}'::jsonb) AS reactions_data
+    COALESCE(mra.reactions_summary_json, '{}'::jsonb) AS reactions_data,
+    cm.reply_to_message_id,
+    replied_msg.sender_user_id AS replied_message_sender_id,
+    COALESCE(substring(replied_msg.message_text for 50)::TEXT, '') AS replied_message_text_snippet,
+    replied_msg.media_type AS replied_message_media_type
 FROM chat_messages cm
 LEFT JOIN MessageReactionsAgg mra ON cm.id = mra.message_id
+LEFT JOIN chat_messages replied_msg ON cm.reply_to_message_id = replied_msg.id
 WHERE (cm.sender_user_id = $1 AND cm.recipient_user_id = $2)
    OR (cm.sender_user_id = $2 AND cm.recipient_user_id = $1)
 ORDER BY cm.sent_at ASC;

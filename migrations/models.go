@@ -734,14 +734,15 @@ type AppOpenLog struct {
 }
 
 type ChatMessage struct {
-	ID              int64
-	SenderUserID    int32
-	RecipientUserID int32
-	MessageText     pgtype.Text
-	MediaUrl        pgtype.Text
-	MediaType       pgtype.Text
-	SentAt          pgtype.Timestamptz
-	IsRead          bool
+	ID               int64
+	SenderUserID     int32
+	RecipientUserID  int32
+	MessageText      pgtype.Text
+	MediaUrl         pgtype.Text
+	MediaType        pgtype.Text
+	SentAt           pgtype.Timestamptz
+	IsRead           bool
+	ReplyToMessageID pgtype.Int8
 }
 
 type DateVibesPrompt struct {
