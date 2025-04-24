@@ -1459,6 +1459,25 @@ func (q *Queries) LogAppOpen(ctx context.Context, userID int32) error {
 	return err
 }
 
+const markChatAsReadOnUnmatch = `-- name: MarkChatAsReadOnUnmatch :execresult
+UPDATE chat_messages
+SET is_read = true
+WHERE is_read = false
+  AND (
+       (recipient_user_id = $1 AND sender_user_id = $2)
+    OR (recipient_user_id = $2 AND sender_user_id = $1)
+  )
+`
+
+type MarkChatAsReadOnUnmatchParams struct {
+	RecipientUserID int32
+	SenderUserID    int32
+}
+
+func (q *Queries) MarkChatAsReadOnUnmatch(ctx context.Context, arg MarkChatAsReadOnUnmatchParams) (pgconn.CommandTag, error) {
+	return q.db.Exec(ctx, markChatAsReadOnUnmatch, arg.RecipientUserID, arg.SenderUserID)
+}
+
 const markLikesAsSeenUntil = `-- name: MarkLikesAsSeenUntil :execresult
 UPDATE likes
 SET is_seen = true
