@@ -861,6 +861,39 @@ func (q *Queries) GetLikersForUser(ctx context.Context, likedUserID int32) ([]Ge
 	return items, nil
 }
 
+const getMatchIDs = `-- name: GetMatchIDs :many
+SELECT
+  l1.liked_user_id
+FROM
+  likes l1
+JOIN
+  likes l2
+  ON l1.liker_user_id = l2.liked_user_id
+  AND l1.liked_user_id = l2.liker_user_id
+WHERE
+  l1.liker_user_id = $1
+`
+
+func (q *Queries) GetMatchIDs(ctx context.Context, likerUserID int32) ([]int32, error) {
+	rows, err := q.db.Query(ctx, getMatchIDs, likerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int32
+	for rows.Next() {
+		var liked_user_id int32
+		if err := rows.Scan(&liked_user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, liked_user_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getMatchesWithLastEvent = `-- name: GetMatchesWithLastEvent :many
 SELECT
     target_user.id AS matched_user_id,
