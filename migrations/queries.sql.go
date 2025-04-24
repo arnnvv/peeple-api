@@ -525,10 +525,30 @@ func (q *Queries) GetActiveSubscription(ctx context.Context, arg GetActiveSubscr
 }
 
 const getConversationMessages = `-- name: GetConversationMessages :many
-SELECT id, sender_user_id, recipient_user_id, message_text, media_url, media_type, sent_at, is_read FROM chat_messages
-WHERE (sender_user_id = $1 AND recipient_user_id = $2)
-   OR (sender_user_id = $2 AND recipient_user_id = $1)
-ORDER BY sent_at ASC
+WITH MessageReactionsAgg AS (
+    SELECT
+        message_id,
+        jsonb_object_agg(emoji, count) FILTER (WHERE emoji IS NOT NULL) AS reactions_summary_json
+     FROM (
+        SELECT message_id, emoji, COUNT(user_id) as count
+        FROM message_reactions
+        WHERE message_id IN (
+            SELECT id FROM chat_messages
+            WHERE (sender_user_id = $1 AND recipient_user_id = $2)
+               OR (sender_user_id = $2 AND recipient_user_id = $1)
+        )
+        GROUP BY message_id, emoji
+     ) AS grouped_reactions
+    GROUP BY message_id
+)
+SELECT
+    cm.id, cm.sender_user_id, cm.recipient_user_id, cm.message_text, cm.media_url, cm.media_type, cm.sent_at, cm.is_read,
+    COALESCE(mra.reactions_summary_json, '{}'::jsonb) AS reactions_data
+FROM chat_messages cm
+LEFT JOIN MessageReactionsAgg mra ON cm.id = mra.message_id
+WHERE (cm.sender_user_id = $1 AND cm.recipient_user_id = $2)
+   OR (cm.sender_user_id = $2 AND cm.recipient_user_id = $1)
+ORDER BY cm.sent_at ASC
 `
 
 type GetConversationMessagesParams struct {
@@ -536,15 +556,27 @@ type GetConversationMessagesParams struct {
 	RecipientUserID int32
 }
 
-func (q *Queries) GetConversationMessages(ctx context.Context, arg GetConversationMessagesParams) ([]ChatMessage, error) {
+type GetConversationMessagesRow struct {
+	ID              int64
+	SenderUserID    int32
+	RecipientUserID int32
+	MessageText     pgtype.Text
+	MediaUrl        pgtype.Text
+	MediaType       pgtype.Text
+	SentAt          pgtype.Timestamptz
+	IsRead          bool
+	ReactionsData   []byte
+}
+
+func (q *Queries) GetConversationMessages(ctx context.Context, arg GetConversationMessagesParams) ([]GetConversationMessagesRow, error) {
 	rows, err := q.db.Query(ctx, getConversationMessages, arg.SenderUserID, arg.RecipientUserID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ChatMessage
+	var items []GetConversationMessagesRow
 	for rows.Next() {
-		var i ChatMessage
+		var i GetConversationMessagesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.SenderUserID,
@@ -554,6 +586,7 @@ func (q *Queries) GetConversationMessages(ctx context.Context, arg GetConversati
 			&i.MediaType,
 			&i.SentAt,
 			&i.IsRead,
+			&i.ReactionsData,
 		); err != nil {
 			return nil, err
 		}
@@ -812,17 +845,17 @@ func (q *Queries) GetLikersForUser(ctx context.Context, likedUserID int32) ([]Ge
 	return items, nil
 }
 
-const getMatchesWithLastMessage = `-- name: GetMatchesWithLastMessage :many
+const getMatchesWithLastEvent = `-- name: GetMatchesWithLastEvent :many
 SELECT
     target_user.id AS matched_user_id,
     target_user.name AS matched_user_name,
     target_user.last_name AS matched_user_last_name,
     target_user.media_urls AS matched_user_media_urls,
-    COALESCE(last_msg.message_text, '') AS last_message_text,
-    last_msg.media_type AS last_message_media_type,
-    last_msg.media_url AS last_message_media_url,
-    last_msg.sent_at AS last_message_sent_at,
-    COALESCE(last_msg.sender_user_id, 0) AS last_message_sender_id,
+    last_event.event_at AS last_event_timestamp,
+    last_event.event_user_id AS last_event_user_id,
+    last_event.event_type AS last_event_type,
+    last_event.event_content AS last_event_content,
+    last_event.event_extra AS last_event_extra,
     (
         SELECT COUNT(*)
         FROM chat_messages cm_unread
@@ -835,62 +868,78 @@ FROM
 JOIN
     users target_user ON l1.liked_user_id = target_user.id
 JOIN
-    likes l2 ON l1.liked_user_id = l2.liker_user_id AND l1.liker_user_id = l2.liked_user_id
+    likes l2 ON l1.liked_user_id = l2.liker_user_id
+              AND l1.liker_user_id = l2.liked_user_id
 LEFT JOIN LATERAL (
-    SELECT
-        cm.message_text,
-        cm.media_type,
-        cm.media_url,
-        cm.sent_at,
-        cm.sender_user_id
-    FROM
-        chat_messages cm
-    WHERE
-        (cm.sender_user_id = l1.liker_user_id AND cm.recipient_user_id = l1.liked_user_id)
-        OR (cm.sender_user_id = l1.liked_user_id AND cm.recipient_user_id = l1.liker_user_id)
-    ORDER BY
-        cm.sent_at DESC
+    (
+        SELECT
+            cm.sent_at AS event_at,
+            cm.sender_user_id AS event_user_id,
+            CASE WHEN cm.message_text IS NOT NULL THEN 'text' ELSE 'media' END AS event_type,
+            COALESCE(cm.message_text, cm.media_type) AS event_content,
+            cm.media_url AS event_extra
+        FROM chat_messages cm
+        WHERE (cm.sender_user_id = l1.liker_user_id AND cm.recipient_user_id = l1.liked_user_id)
+           OR (cm.sender_user_id = l1.liked_user_id AND cm.recipient_user_id = l1.liker_user_id)
+
+        UNION ALL
+
+        SELECT
+            mr.updated_at AS event_at,
+            mr.user_id AS event_user_id,
+            'reaction' AS event_type,
+            mr.emoji AS event_content,
+            NULL AS event_extra
+        FROM message_reactions mr
+        JOIN chat_messages cm_react ON mr.message_id = cm_react.id
+        WHERE (mr.user_id = l1.liker_user_id OR mr.user_id = l1.liked_user_id)
+          AND (
+                  (cm_react.sender_user_id = l1.liker_user_id AND cm_react.recipient_user_id = l1.liked_user_id)
+               OR (cm_react.sender_user_id = l1.liked_user_id AND cm_react.recipient_user_id = l1.liker_user_id)
+              )
+    )
+    ORDER BY event_at DESC
     LIMIT 1
-) last_msg ON true
+) AS last_event ON true
 WHERE
     l1.liker_user_id = $1
 ORDER BY
-    last_msg.sent_at DESC NULLS LAST,
+    last_event_timestamp DESC NULLS LAST,
     target_user.id
 `
 
-type GetMatchesWithLastMessageRow struct {
+type GetMatchesWithLastEventRow struct {
 	MatchedUserID        int32
 	MatchedUserName      pgtype.Text
 	MatchedUserLastName  pgtype.Text
 	MatchedUserMediaUrls []string
-	LastMessageText      string
-	LastMessageMediaType pgtype.Text
-	LastMessageMediaUrl  pgtype.Text
-	LastMessageSentAt    pgtype.Timestamptz
-	LastMessageSenderID  int32
+	LastEventTimestamp   pgtype.Timestamptz
+	LastEventUserID      int32
+	LastEventType        string
+	LastEventContent     pgtype.Text
+	LastEventExtra       pgtype.Text
 	UnreadMessageCount   int64
 }
 
-func (q *Queries) GetMatchesWithLastMessage(ctx context.Context, likerUserID int32) ([]GetMatchesWithLastMessageRow, error) {
-	rows, err := q.db.Query(ctx, getMatchesWithLastMessage, likerUserID)
+func (q *Queries) GetMatchesWithLastEvent(ctx context.Context, likerUserID int32) ([]GetMatchesWithLastEventRow, error) {
+	rows, err := q.db.Query(ctx, getMatchesWithLastEvent, likerUserID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []GetMatchesWithLastMessageRow
+	var items []GetMatchesWithLastEventRow
 	for rows.Next() {
-		var i GetMatchesWithLastMessageRow
+		var i GetMatchesWithLastEventRow
 		if err := rows.Scan(
 			&i.MatchedUserID,
 			&i.MatchedUserName,
 			&i.MatchedUserLastName,
 			&i.MatchedUserMediaUrls,
-			&i.LastMessageText,
-			&i.LastMessageMediaType,
-			&i.LastMessageMediaUrl,
-			&i.LastMessageSentAt,
-			&i.LastMessageSenderID,
+			&i.LastEventTimestamp,
+			&i.LastEventUserID,
+			&i.LastEventType,
+			&i.LastEventContent,
+			&i.LastEventExtra,
 			&i.UnreadMessageCount,
 		); err != nil {
 			return nil, err

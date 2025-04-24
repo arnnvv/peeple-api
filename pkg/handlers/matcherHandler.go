@@ -13,14 +13,16 @@ import (
 )
 
 type MatchInfo struct {
-	MatchedUserID       int32      `json:"matched_user_id"`
-	Name                string     `json:"name"`
-	FirstProfilePicURL  string     `json:"first_profile_pic_url"`
-	LastMessage         *string    `json:"last_message,omitempty"`
-	LastMessageType     *string    `json:"last_message_type,omitempty"`
-	LastMessageMediaURL *string    `json:"last_message_media_url,omitempty"`
-	LastMessageSentAt   *time.Time `json:"last_message_sent_at,omitempty"`
-	UnreadMessageCount  int64      `json:"unread_message_count"`
+	MatchedUserID      int32  `json:"matched_user_id"`
+	Name               string `json:"name"`
+	FirstProfilePicURL string `json:"first_profile_pic_url"`
+	UnreadMessageCount int64  `json:"unread_message_count"`
+
+	LastEventTimestamp *time.Time `json:"last_event_timestamp,omitempty"`
+	LastEventUserID    *int32     `json:"last_event_user_id,omitempty"`
+	LastEventType      *string    `json:"last_event_type,omitempty"`
+	LastEventContent   *string    `json:"last_event_content,omitempty"`
+	LastEventMediaURL  *string    `json:"last_event_media_url,omitempty"`
 }
 
 type GetMatchesResponse struct {
@@ -51,9 +53,9 @@ func GetMatchesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	requestingUserID := int32(claims.UserID)
 
-	log.Printf("INFO: GetMatchesHandler: Fetching matches for user %d", requestingUserID)
+	log.Printf("INFO: GetMatchesHandler: Fetching matches with last event for user %d", requestingUserID)
 
-	dbMatches, err := queries.GetMatchesWithLastMessage(ctx, requestingUserID)
+	dbMatches, err := queries.GetMatchesWithLastEvent(ctx, requestingUserID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		log.Printf("ERROR: GetMatchesHandler: Failed to fetch matches for user %d: %v", requestingUserID, err)
 		utils.RespondWithJSON(w, http.StatusInternalServerError, GetMatchesResponse{Success: false, Message: "Error retrieving matches", Matches: []MatchInfo{}})
@@ -64,49 +66,53 @@ func GetMatchesHandler(w http.ResponseWriter, r *http.Request) {
 
 	for _, dbMatch := range dbMatches {
 		match := MatchInfo{
-			MatchedUserID:       dbMatch.MatchedUserID,
-			Name:                buildFullName(dbMatch.MatchedUserName, dbMatch.MatchedUserLastName),
-			FirstProfilePicURL:  getFirstMediaURL(dbMatch.MatchedUserMediaUrls),
-			UnreadMessageCount:  dbMatch.UnreadMessageCount, // Assign the count directly
-			LastMessage:         nil,
-			LastMessageType:     nil,
-			LastMessageMediaURL: nil,
-			LastMessageSentAt:   nil,
+			MatchedUserID:      dbMatch.MatchedUserID,
+			Name:               buildFullName(dbMatch.MatchedUserName, dbMatch.MatchedUserLastName),
+			FirstProfilePicURL: getFirstMediaURL(dbMatch.MatchedUserMediaUrls),
+			UnreadMessageCount: dbMatch.UnreadMessageCount,
+			LastEventTimestamp: nil,
+			LastEventUserID:    nil,
+			LastEventType:      nil,
+			LastEventContent:   nil,
+			LastEventMediaURL:  nil,
 		}
 
-		if dbMatch.LastMessageText != "" { // If text is not empty, it was likely a text message
-			messageText := dbMatch.LastMessageText
-			match.LastMessage = &messageText
-			messageType := "text" // Assume text if text content exists
-			match.LastMessageType = &messageType
-		} else if dbMatch.LastMessageMediaUrl.Valid { // If no text, check if media URL is valid
-			mediaUrl := dbMatch.LastMessageMediaUrl.String
-			match.LastMessageMediaURL = &mediaUrl
-			if dbMatch.LastMessageMediaType.Valid { // If media URL is valid, use the media type
-				mediaType := dbMatch.LastMessageMediaType.String
-				match.LastMessageType = &mediaType // e.g., "image/jpeg", "video/mp4"
-			} else {
-				// Fallback if URL exists but type doesn't (shouldn't happen with constraints)
-				unknownType := "media"
-				match.LastMessageType = &unknownType
+		// *** FIX: Check nullability based on Timestamp being valid ***
+		// If the LEFT JOIN didn't find an event, the timestamp (and likely others) will be NULL/Invalid.
+		// Assume LastEventTimestamp is pgtype.Timestamptz as it's less likely sqlc got *that* wrong.
+		// If it IS ALSO a basic time.Time, check !dbMatch.LastEventTimestamp.IsZero()
+		if dbMatch.LastEventTimestamp.Valid {
+
+			ts := dbMatch.LastEventTimestamp.Time
+			match.LastEventTimestamp = &ts
+
+			// Assign basic types directly IF they are not zero/empty (use pointers)
+			// We assume if Timestamp is valid, the other fields from the LATERAL JOIN row are also valid,
+			// even if they are basic types now.
+			eventType := dbMatch.LastEventType // Access directly as string
+			if eventType != "" {               // Check if not empty string
+				match.LastEventType = &eventType
+			}
+
+			eventUserID := dbMatch.LastEventUserID // Access directly as int32
+			if eventUserID != 0 {                  // Check if not zero (assuming 0 is not a valid user ID here)
+				match.LastEventUserID = &eventUserID
+			}
+
+			if dbMatch.LastEventContent.Valid {
+				content := dbMatch.LastEventContent.String
+				match.LastEventContent = &content
+			}
+			if eventType == "media" && dbMatch.LastEventExtra.Valid {
+				mediaUrl := dbMatch.LastEventExtra.String
+				match.LastEventMediaURL = &mediaUrl
 			}
 		}
-		// If both text and media are absent, LastMessageType remains nil
-
-		if dbMatch.LastMessageSentAt.Valid {
-			validTime := dbMatch.LastMessageSentAt.Time
-			match.LastMessageSentAt = &validTime
-		}
-
-		// if dbMatch.LastMessageSenderID != 0 {
-		//     senderID := dbMatch.LastMessageSenderID
-		//     match.LastMessageSenderID = &senderID
-		// }
 
 		responseMatches = append(responseMatches, match)
 	}
 
-	log.Printf("INFO: GetMatchesHandler: Found %d matches for user %d, processed with last message details and unread counts.", len(responseMatches), requestingUserID)
+	log.Printf("INFO: GetMatchesHandler: Found %d matches for user %d, processed with last event details.", len(responseMatches), requestingUserID)
 
 	utils.RespondWithJSON(w, http.StatusOK, GetMatchesResponse{
 		Success: true,
