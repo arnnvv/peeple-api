@@ -483,3 +483,33 @@ SELECT EXISTS (
     WHERE id = $1
       AND liked_user_id = $2
 );
+
+-- name: UpsertMessageReaction :one
+INSERT INTO message_reactions (message_id, user_id, emoji)
+VALUES ($1, $2, $3)
+ON CONFLICT (message_id, user_id) DO UPDATE SET
+    emoji = EXCLUDED.emoji,
+    updated_at = NOW()
+RETURNING *;
+
+-- name: DeleteMessageReactionByUser :execresult
+DELETE FROM message_reactions
+WHERE message_id = $1
+  AND user_id = $2;
+
+-- name: GetSingleReactionByUser :one
+SELECT id, message_id, user_id, emoji, created_at, updated_at
+FROM message_reactions
+WHERE message_id = $1 AND user_id = $2
+LIMIT 1;
+
+-- name: GetUserReactionsForMessages :many
+SELECT message_id, emoji
+FROM message_reactions
+WHERE user_id = $1 AND message_id = ANY($2::bigint[]);
+
+-- name: GetMessageSenderRecipient :one
+SELECT sender_user_id, recipient_user_id
+FROM chat_messages
+WHERE id = $1
+LIMIT 1;

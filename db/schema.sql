@@ -298,3 +298,21 @@ CREATE TABLE reports (
 
 CREATE INDEX idx_reports_reporter_user_id ON reports(reporter_user_id);
 CREATE INDEX idx_reports_reported_user_id ON reports(reported_user_id);
+
+CREATE TABLE message_reactions (
+    id BIGSERIAL PRIMARY KEY,
+    message_id BIGINT NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    emoji VARCHAR(13) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_message_user UNIQUE (message_id, user_id)
+);
+
+CREATE INDEX idx_message_reactions_message_id ON message_reactions (message_id);
+CREATE INDEX idx_message_reactions_user_id ON message_reactions (user_id);
+
+CREATE TRIGGER set_reaction_timestamp
+BEFORE UPDATE ON message_reactions
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
