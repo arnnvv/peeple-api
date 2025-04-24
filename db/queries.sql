@@ -513,3 +513,12 @@ SELECT sender_user_id, recipient_user_id
 FROM chat_messages
 WHERE id = $1
 LIMIT 1;
+
+-- name: MarkChatAsReadOnUnmatch :execresult
+UPDATE chat_messages
+SET is_read = true
+WHERE is_read = false
+  AND (
+       (recipient_user_id = $1 AND sender_user_id = $2)
+    OR (recipient_user_id = $2 AND sender_user_id = $1)
+  );

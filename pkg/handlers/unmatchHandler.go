@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"errors"
 	"log"
 	"net/http"
 
@@ -10,7 +9,6 @@ import (
 	"github.com/arnnvv/peeple-api/pkg/db"
 	"github.com/arnnvv/peeple-api/pkg/token"
 	"github.com/arnnvv/peeple-api/pkg/utils"
-	"github.com/jackc/pgx/v5"
 )
 
 type UnmatchRequest struct {
@@ -71,7 +69,15 @@ func UnmatchHandler(w http.ResponseWriter, r *http.Request) {
 		utils.RespondWithJSON(w, http.StatusInternalServerError, UnmatchResponse{Success: false, Message: "Database transaction error"})
 		return
 	}
-	defer tx.Rollback(ctx)
+	defer func() {
+		if err != nil {
+			log.Printf("WARN: UnmatchHandler: Rolling back transaction due to error: %v", err)
+			rbErr := tx.Rollback(ctx)
+			if rbErr != nil {
+				log.Printf("ERROR: UnmatchHandler: Failed to rollback transaction: %v", rbErr)
+			}
+		}
+	}()
 
 	qtx := queries.WithTx(tx)
 
@@ -80,7 +86,7 @@ func UnmatchHandler(w http.ResponseWriter, r *http.Request) {
 		LikerUserID: requesterUserID,
 		LikedUserID: req.TargetUserID,
 	})
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	if err != nil {
 		log.Printf("ERROR: UnmatchHandler: Failed to delete likes between %d and %d: %v", requesterUserID, req.TargetUserID, err)
 		utils.RespondWithJSON(w, http.StatusInternalServerError, UnmatchResponse{Success: false, Message: "Failed to remove existing connection"})
 		return
@@ -96,6 +102,19 @@ func UnmatchHandler(w http.ResponseWriter, r *http.Request) {
 		utils.RespondWithJSON(w, http.StatusInternalServerError, UnmatchResponse{Success: false, Message: "Failed to record dislike"})
 		return
 	}
+
+	log.Printf("DEBUG: UnmatchHandler: Marking chat messages as read for recipient %d from sender %d", requesterUserID, req.TargetUserID)
+	markReadParams := migrations.MarkChatAsReadOnUnmatchParams{
+		RecipientUserID: requesterUserID,
+		SenderUserID:    req.TargetUserID,
+	}
+	cmdTag, err := qtx.MarkChatAsReadOnUnmatch(ctx, markReadParams)
+	if err != nil {
+		log.Printf("ERROR: UnmatchHandler: Failed to mark chat messages as read between %d and %d: %v", requesterUserID, req.TargetUserID, err)
+		utils.RespondWithJSON(w, http.StatusInternalServerError, UnmatchResponse{Success: false, Message: "Failed to update chat read status"})
+		return
+	}
+	log.Printf("DEBUG: UnmatchHandler: Marked %d messages as read.", cmdTag.RowsAffected())
 
 	err = tx.Commit(ctx)
 	if err != nil {
