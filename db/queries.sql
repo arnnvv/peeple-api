@@ -562,3 +562,15 @@ WHERE
 ORDER BY
     last_event_timestamp DESC NULLS LAST,
     target_user.id;
+
+-- name: GetMatchIDs :many
+SELECT
+  l1.liked_user_id
+FROM
+  likes l1
+JOIN
+  likes l2
+  ON l1.liker_user_id = l2.liked_user_id
+  AND l1.liked_user_id = l2.liker_user_id
+WHERE
+  l1.liker_user_id = $1;
