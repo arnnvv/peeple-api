@@ -13,6 +13,7 @@ import (
 	"github.com/arnnvv/peeple-api/pkg/db"
 	"github.com/arnnvv/peeple-api/pkg/handlers"
 	"github.com/arnnvv/peeple-api/pkg/token"
+	"github.com/arnnvv/peeple-api/pkg/ws"
 )
 
 type Config struct {
@@ -36,8 +37,11 @@ func loadConfig() Config {
 		}{
 			ReadHeader: 5 * time.Second,
 			Write:      10 * time.Second,
-			Idle:       60 * time.Second,
+			Idle:       90 * time.Second,
 		},
+	}
+	if cfg.DatabaseURL == "" {
+		log.Fatal("FATAL: DATABASE_URL environment variable not set.")
 	}
 	return cfg
 }
@@ -45,6 +49,9 @@ func loadConfig() Config {
 func getEnv(key, defaultValue string) string {
 	if value, exists := os.LookupEnv(key); exists {
 		return value
+	}
+	if defaultValue == "" {
+		log.Printf("Warning: Environment variable %s not set and no default value provided.", key)
 	}
 	return defaultValue
 }
@@ -58,12 +65,19 @@ func main() {
 	}
 	defer db.CloseDB()
 
+	queries, err := db.GetDB()
+	if err != nil {
+		log.Fatalf("Failed to get DB queries for Hub: %v", err)
+	}
+	hub := ws.NewHub(queries)
+	go hub.Run()
+
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
 		ReadHeaderTimeout: cfg.ServerTimeout.ReadHeader,
 		WriteTimeout:      cfg.ServerTimeout.Write,
 		IdleTimeout:       cfg.ServerTimeout.Idle,
-		Handler:           setupRoutes(),
+		Handler:           setupRoutes(hub),
 	}
 
 	serverCtx, serverStopCtx := context.WithCancel(context.Background())
@@ -76,14 +90,12 @@ func main() {
 
 		shutdownCtx, cancel := context.WithTimeout(serverCtx, 30*time.Second)
 		defer cancel()
-
 		go func() {
 			<-shutdownCtx.Done()
 			if shutdownCtx.Err() == context.DeadlineExceeded {
 				log.Fatal("Graceful shutdown timed out.. forcing exit")
 			}
 		}()
-
 		if err := server.Shutdown(shutdownCtx); err != nil {
 			log.Fatalf("Server shutdown error: %v", err)
 		}
@@ -99,8 +111,11 @@ func main() {
 	log.Println("Server stopped")
 }
 
-func setupRoutes() *http.ServeMux {
+func setupRoutes(hub *ws.Hub) *http.ServeMux {
 	mux := http.NewServeMux()
+
+	actualReactionHandler := handlers.ToggleReplaceReactionHandler(hub)
+	actualChatHandler := handlers.ChatHandler(hub)
 
 	mux.HandleFunc("/api/auth/google/verify", handlers.GoogleAuthHandler)
 	mux.HandleFunc("/token", token.GenerateTokenHandler)
@@ -130,10 +145,10 @@ func setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/liker-profile/", authMiddleware(handlers.GetLikerProfileHandler))
 	mux.HandleFunc("/api/matches", authMiddleware(handlers.GetMatchesHandler))
 	mux.HandleFunc("/api/iap/verify", authMiddleware(handlers.VerifyPurchaseHandler))
-	mux.HandleFunc("/chat", authMiddleware(handlers.ChatHandler))
+	mux.HandleFunc("/chat", authMiddleware(actualChatHandler))
 	mux.HandleFunc("/api/conversation", authMiddleware(handlers.GetConversationHandler))
 	mux.HandleFunc("/api/chat/upload", authMiddleware(handlers.GenerateChatMediaPresignedURL))
-	mux.HandleFunc("/api/chat/react", authMiddleware(handlers.ToggleReplaceReactionHandler))
+	mux.HandleFunc("/api/chat/react", authMiddleware(actualReactionHandler))
 	mux.HandleFunc("/api/chat/mark-read-until", authMiddleware(handlers.MarkReadUntilHandler))
 	mux.HandleFunc("/api/unread-chat-count", authMiddleware(handlers.GetUnreadCountHandler))
 	mux.HandleFunc("/api/me/update-online", authMiddleware(handlers.UpdateOnlineStatusHandler))
