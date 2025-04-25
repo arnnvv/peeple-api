@@ -7,8 +7,9 @@ import (
 )
 
 type WsMessage struct {
-	Type             string  `json:"type"`
-	ID               *int64  `json:"id,omitempty"`
+	Type string `json:"type"`
+	ID   *int64 `json:"id,omitempty"`
+
 	SenderUserID     *int32  `json:"sender_user_id,omitempty"`
 	RecipientUserID  *int32  `json:"recipient_user_id,omitempty"`
 	Text             *string `json:"text,omitempty"`
@@ -16,16 +17,13 @@ type WsMessage struct {
 	MediaType        *string `json:"media_type,omitempty"`
 	SentAt           *string `json:"sent_at,omitempty"` // ISO 8601 format string
 	ReplyToMessageID *int64  `json:"reply_to_message_id,omitempty"`
-
-	MessageID     *int64  `json:"message_id,omitempty"`
-	ReactorUserID *int32  `json:"reactor_user_id,omitempty"`
-	Emoji         *string `json:"emoji,omitempty"`
-	IsRemoved     *bool   `json:"is_removed,omitempty"`
-
-	UserID *int32  `json:"user_id,omitempty"`
-	Status *string `json:"status,omitempty"`
-
-	Content *string `json:"content,omitempty"`
+	MessageID        *int64  `json:"message_id,omitempty"`
+	Emoji            *string `json:"emoji,omitempty"`
+	ReactorUserID    *int32  `json:"reactor_user_id,omitempty"`
+	IsRemoved        *bool   `json:"is_removed,omitempty"`
+	UserID           *int32  `json:"user_id,omitempty"`
+	Status           *string `json:"status,omitempty"`
+	Content          *string `json:"content,omitempty"`
 }
 
 func ChatMessageToWsMessage(dbMsg migrations.GetConversationMessagesRow) WsMessage {
