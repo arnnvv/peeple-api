@@ -36,7 +36,6 @@ func GetMatchesHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	queries, errDb := db.GetDB()
 	if errDb != nil || queries == nil {
-		log.Println("ERROR: GetMatchesHandler: Database connection not available.")
 		utils.RespondWithJSON(w, http.StatusInternalServerError, GetMatchesResponse{Success: false, Message: "Database connection error", Matches: []MatchInfo{}})
 		return
 	}
@@ -77,35 +76,25 @@ func GetMatchesHandler(w http.ResponseWriter, r *http.Request) {
 			LastEventMediaURL:  nil,
 		}
 
-		// *** FIX: Check nullability based on Timestamp being valid ***
-		// If the LEFT JOIN didn't find an event, the timestamp (and likely others) will be NULL/Invalid.
-		// Assume LastEventTimestamp is pgtype.Timestamptz as it's less likely sqlc got *that* wrong.
-		// If it IS ALSO a basic time.Time, check !dbMatch.LastEventTimestamp.IsZero()
-		if dbMatch.LastEventTimestamp.Valid {
+		if dbMatch.LastEventUserID != 0 {
+			uid := dbMatch.LastEventUserID
+			match.LastEventUserID = &uid
 
-			ts := dbMatch.LastEventTimestamp.Time
-			match.LastEventTimestamp = &ts
-
-			// Assign basic types directly IF they are not zero/empty (use pointers)
-			// We assume if Timestamp is valid, the other fields from the LATERAL JOIN row are also valid,
-			// even if they are basic types now.
-			eventType := dbMatch.LastEventType // Access directly as string
-			if eventType != "" {               // Check if not empty string
-				match.LastEventType = &eventType
+			if dbMatch.LastEventTimestamp.Valid {
+				ts := dbMatch.LastEventTimestamp.Time
+				match.LastEventTimestamp = &ts
 			}
-
-			eventUserID := dbMatch.LastEventUserID // Access directly as int32
-			if eventUserID != 0 {                  // Check if not zero (assuming 0 is not a valid user ID here)
-				match.LastEventUserID = &eventUserID
+			if dbMatch.LastEventType != "" {
+				et := dbMatch.LastEventType
+				match.LastEventType = &et
 			}
-
-			if dbMatch.LastEventContent.Valid {
-				content := dbMatch.LastEventContent.String
-				match.LastEventContent = &content
+			if dbMatch.LastEventContent != "" {
+				ec := dbMatch.LastEventContent
+				match.LastEventContent = &ec
 			}
-			if eventType == "media" && dbMatch.LastEventExtra.Valid {
-				mediaUrl := dbMatch.LastEventExtra.String
-				match.LastEventMediaURL = &mediaUrl
+			if dbMatch.LastEventType == "media" && dbMatch.LastEventExtra != "" {
+				ee := dbMatch.LastEventExtra
+				match.LastEventMediaURL = &ee
 			}
 		}
 
