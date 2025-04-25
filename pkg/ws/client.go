@@ -91,9 +91,10 @@ func (c *Client) readPump() {
 				continue
 			}
 			recipientID := *msg.RecipientUserID
-
-			createParams := migrations.CreateChatMessageParams{ /* ... */ SenderUserID: c.UserID, RecipientUserID: recipientID}
-
+			createParams := migrations.CreateChatMessageParams{
+				SenderUserID:    c.UserID,
+				RecipientUserID: recipientID,
+			}
 			isMedia := false
 			if msg.Text != nil && *msg.Text != "" {
 				if len(*msg.Text) > 500 {
@@ -109,7 +110,6 @@ func (c *Client) readPump() {
 				c.sendWsError("Invalid message content (text or media required)")
 				continue
 			}
-
 			if msg.ReplyToMessageID != nil && *msg.ReplyToMessageID > 0 {
 				replyToID := *msg.ReplyToMessageID
 				originalMsg, errVal := queries.GetMessageSenderRecipient(context.Background(), replyToID)
@@ -130,7 +130,6 @@ func (c *Client) readPump() {
 				}
 				createParams.ReplyToMessageID = pgtype.Int8{Int64: replyToID, Valid: true}
 			}
-
 			mutualLikeParams := migrations.CheckMutualLikeExistsParams{LikerUserID: c.UserID, LikedUserID: recipientID}
 			mutualLike, errLikeCheck := queries.CheckMutualLikeExists(context.Background(), mutualLikeParams)
 			if errLikeCheck != nil {
@@ -142,7 +141,6 @@ func (c *Client) readPump() {
 				c.sendWsError("You can only message matched users")
 				continue
 			}
-
 			savedMsg, dbErr := queries.CreateChatMessage(context.Background(), createParams)
 			if dbErr != nil {
 				log.Printf("Client ReadPump ERROR: Failed to save chat message from %d to %d: %v", c.UserID, recipientID, dbErr)
@@ -150,15 +148,17 @@ func (c *Client) readPump() {
 				continue
 			}
 			log.Printf("Client ReadPump INFO: Message saved: ID=%d, %d -> %d (Media: %t)", savedMsg.ID, c.UserID, recipientID, isMedia)
-
 			wsMsgToSend := WsMessage{
 				Type:            "chat_message",
 				ID:              &savedMsg.ID,
 				SenderUserID:    &savedMsg.SenderUserID,
 				RecipientUserID: &savedMsg.RecipientUserID,
-				Text:            nil, MediaURL: nil, MediaType: nil,
-				SentAt: Ptr(savedMsg.SentAt.Time.UTC().Format(time.RFC3339Nano)),
+				Text:            nil,
+				MediaURL:        nil,
+				MediaType:       nil,
+				SentAt:          Ptr(savedMsg.SentAt.Time.UTC().Format(time.RFC3339Nano)),
 			}
+
 			if savedMsg.MessageText.Valid {
 				wsMsgToSend.Text = &savedMsg.MessageText.String
 			}
@@ -171,7 +171,6 @@ func (c *Client) readPump() {
 			if savedMsg.ReplyToMessageID.Valid {
 				wsMsgToSend.ReplyToMessageID = &savedMsg.ReplyToMessageID.Int64
 			}
-
 			msgBytes, marshalErr := json.Marshal(wsMsgToSend)
 			if marshalErr != nil {
 				log.Printf("Client ReadPump ERROR: Failed to marshal outgoing message ID %d: %v", savedMsg.ID, marshalErr)
@@ -195,7 +194,6 @@ func (c *Client) readPump() {
 
 		} else if msg.Type == "react_to_message" {
 			reactorUserID := c.UserID
-
 			if msg.MessageID == nil || *msg.MessageID <= 0 {
 				c.sendWsError("Valid message_id is required for reaction")
 				continue
@@ -206,9 +204,7 @@ func (c *Client) readPump() {
 			}
 			targetMessageID := *msg.MessageID
 			reactionEmoji := *msg.Emoji
-
 			log.Printf("Client ReadPump INFO: User %d attempting reaction '%s' on message %d via WS.", reactorUserID, reactionEmoji, targetMessageID)
-
 			msgParticipants, err := queries.GetMessageSenderRecipient(context.Background(), targetMessageID)
 			if err != nil {
 				errMsg := "Error validating reaction message"
@@ -224,25 +220,22 @@ func (c *Client) readPump() {
 				c.sendWsError("You can only react to messages in your conversations.")
 				continue
 			}
-
-			existingReaction, err := queries.GetSingleReactionByUser(context.Background(), migrations.GetSingleReactionByUserParams{
-				MessageID: targetMessageID,
-				UserID:    reactorUserID,
-			})
+			existingReaction, err := queries.GetSingleReactionByUser(context.Background(),
+				migrations.GetSingleReactionByUserParams{
+					MessageID: targetMessageID,
+					UserID:    reactorUserID,
+				})
 			if err != nil && !errors.Is(err, pgx.ErrNoRows) && !errors.Is(err, sql.ErrNoRows) {
 				log.Printf("Client ReadPump ERROR: Failed to check existing reaction for user %d on message %d: %v", reactorUserID, targetMessageID, err)
 				c.sendWsError("Failed to check existing reaction")
 				continue
 			}
 			reactionExists := !errors.Is(err, pgx.ErrNoRows) && !errors.Is(err, sql.ErrNoRows)
-
 			var finalEmoji string
 			var wasRemoved bool
 			var dbErr error
 			ackContent := ""
-
 			if !reactionExists {
-				log.Printf("Client ReadPump DEBUG: Adding reaction '%s' for user %d on msg %d", reactionEmoji, reactorUserID, targetMessageID)
 				addParams := migrations.UpsertMessageReactionParams{MessageID: targetMessageID, UserID: reactorUserID, Emoji: reactionEmoji}
 				_, dbErr = queries.UpsertMessageReaction(context.Background(), addParams)
 				if dbErr == nil {
@@ -254,7 +247,6 @@ func (c *Client) readPump() {
 				}
 			} else {
 				if existingReaction.Emoji == reactionEmoji {
-					log.Printf("Client ReadPump DEBUG: Removing reaction '%s' for user %d on msg %d", reactionEmoji, reactorUserID, targetMessageID)
 					deleteParams := migrations.DeleteMessageReactionByUserParams{MessageID: targetMessageID, UserID: reactorUserID}
 					_, dbErr = queries.DeleteMessageReactionByUser(context.Background(), deleteParams)
 					if dbErr == nil {
@@ -265,7 +257,6 @@ func (c *Client) readPump() {
 						log.Printf("Client ReadPump ERROR: Failed to delete reaction for user %d: %v", reactorUserID, dbErr)
 					}
 				} else {
-					log.Printf("Client ReadPump DEBUG: Updating reaction from '%s' to '%s' for user %d on msg %d", existingReaction.Emoji, reactionEmoji, reactorUserID, targetMessageID)
 					updateParams := migrations.UpsertMessageReactionParams{MessageID: targetMessageID, UserID: reactorUserID, Emoji: reactionEmoji}
 					_, dbErr = queries.UpsertMessageReaction(context.Background(), updateParams)
 					if dbErr == nil {
@@ -277,23 +268,89 @@ func (c *Client) readPump() {
 					}
 				}
 			}
-
 			if dbErr != nil {
 				c.sendWsError("Failed to process reaction.")
 				continue
 			}
-
 			participants := []int32{msgParticipants.SenderUserID, msgParticipants.RecipientUserID}
 			c.hub.BroadcastReaction(targetMessageID, reactorUserID, finalEmoji, wasRemoved, participants)
-
 			ackMsg := WsMessage{Type: "reaction_ack", Content: Ptr(ackContent), MessageID: &targetMessageID}
 			ackBytes, _ := json.Marshal(ackMsg)
 			select {
 			case c.Send <- ackBytes:
 			default:
 			}
-
 			log.Printf("Client ReadPump INFO: Reaction processed for user %d on msg %d. Action: %s", reactorUserID, targetMessageID, ackContent)
+
+		} else if msg.Type == "mark_read" {
+			recipientUserID := c.UserID
+
+			if msg.OtherUserID == nil || *msg.OtherUserID <= 0 {
+				c.sendWsError("Valid other_user_id is required for mark_read")
+				continue
+			}
+			if msg.MessageID == nil || *msg.MessageID <= 0 {
+				c.sendWsError("Valid message_id (last read) is required for mark_read")
+				continue
+			}
+			senderUserID := *msg.OtherUserID
+			lastMessageID := *msg.MessageID
+
+			if senderUserID == recipientUserID {
+				c.sendWsError("Cannot mark messages from yourself as read this way")
+				continue
+			}
+
+			log.Printf("Client ReadPump INFO: User %d marking messages from user %d as read up to message ID %d",
+				recipientUserID, senderUserID, lastMessageID)
+
+			params := migrations.MarkMessagesAsReadUntilParams{
+				RecipientUserID: recipientUserID,
+				SenderUserID:    senderUserID,
+				ID:              lastMessageID,
+			}
+			cmdTag, err := queries.MarkMessagesAsReadUntil(context.Background(), params)
+			if err != nil {
+				log.Printf("Client ReadPump ERROR: Failed to update messages read status for user %d from user %d: %v", recipientUserID, senderUserID, err)
+				c.sendWsError("Failed to update message status")
+				continue
+			}
+
+			rowsAffected := cmdTag.RowsAffected()
+			log.Printf("Client ReadPump INFO: Successfully marked %d messages as read for user %d from user %d (up to ID %d)",
+				rowsAffected, recipientUserID, senderUserID, lastMessageID)
+
+			ackContent := fmt.Sprintf("Marked %d messages from user %d as read.", rowsAffected, senderUserID)
+			ackMsg := WsMessage{
+				Type:        "mark_read_ack",
+				Content:     &ackContent,
+				OtherUserID: &senderUserID,
+				MessageID:   &lastMessageID,
+				Count:       PtrInt64(rowsAffected),
+			}
+			ackBytes, _ := json.Marshal(ackMsg)
+			select {
+			case c.Send <- ackBytes:
+			default:
+			}
+
+			if rowsAffected > 0 {
+				readUpdateMsg := WsMessage{
+					Type:         "messages_read_update",
+					ReaderUserID: &recipientUserID,
+					MessageID:    &lastMessageID,
+				}
+				readUpdateBytes, errMarshal := json.Marshal(readUpdateMsg)
+				if errMarshal != nil {
+					log.Printf("Client ReadPump ERROR: Failed marshal messages_read_update: %v", errMarshal)
+				} else {
+					if !c.hub.SendToUser(senderUserID, readUpdateBytes) {
+						log.Printf("Client ReadPump DEBUG: User %d (sender) is offline, cannot send read receipt.", senderUserID)
+					} else {
+						log.Printf("Client ReadPump INFO: Sent read receipt to user %d (up to msg %d)", senderUserID, lastMessageID)
+					}
+				}
+			}
 
 		} else {
 			log.Printf("Client ReadPump: Received unhandled message type '%s' from user %d", msg.Type, c.UserID)
@@ -319,7 +376,6 @@ func (c *Client) writePump() {
 				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
-
 			w, err := c.conn.NextWriter(websocket.TextMessage)
 			if err != nil {
 				log.Printf("Client WritePump: Error getting next writer for user %d: %v", c.UserID, err)
@@ -329,7 +385,6 @@ func (c *Client) writePump() {
 			if err != nil {
 				log.Printf("Client WritePump: Error writing message for user %d: %v", c.UserID, err)
 			}
-
 			if err := w.Close(); err != nil {
 				log.Printf("Client WritePump: Error closing writer for user %d: %v", c.UserID, err)
 				return
@@ -352,15 +407,11 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request, userID int32) {
 		return
 	}
 	log.Printf("ServeWs: Connection upgraded successfully for user %d", userID)
-
 	client := &Client{hub: hub, conn: conn, Send: make(chan []byte, 256), UserID: userID}
 	client.hub.register <- client
-
 	go client.writePump()
 	go client.readPump()
-
 	log.Printf("ServeWs: Read and Write pumps started for user %d", userID)
-
 	infoMsg := WsMessage{Type: "info", Content: Ptr("Connected successfully.")}
 	infoBytes, _ := json.Marshal(infoMsg)
 	select {

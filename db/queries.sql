@@ -508,10 +508,10 @@ SELECT
     target_user.last_name AS matched_user_last_name,
     target_user.media_urls AS matched_user_media_urls,
     last_event.event_at AS last_event_timestamp,
-    last_event.event_user_id AS last_event_user_id,
-    last_event.event_type AS last_event_type,
-    last_event.event_content AS last_event_content,
-    last_event.event_extra AS last_event_extra,
+    COALESCE(last_event.event_user_id, 0) AS last_event_user_id,
+    COALESCE(last_event.event_type, '') AS last_event_type,
+    COALESCE(last_event.event_content, '') AS last_event_content,
+    COALESCE(last_event.event_extra, '') AS last_event_extra,
     (
         SELECT COUNT(*)
         FROM chat_messages cm_unread
@@ -560,7 +560,7 @@ LEFT JOIN LATERAL (
 WHERE
     l1.liker_user_id = $1
 ORDER BY
-    last_event_timestamp DESC NULLS LAST,
+    COALESCE(last_event.event_at, '1970-01-01'::timestamptz) DESC,
     target_user.id;
 
 -- name: GetMatchIDs :many
