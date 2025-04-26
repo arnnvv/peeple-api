@@ -13,10 +13,12 @@ import (
 )
 
 type MatchInfo struct {
-	MatchedUserID      int32  `json:"matched_user_id"`
-	Name               string `json:"name"`
-	FirstProfilePicURL string `json:"first_profile_pic_url"`
-	UnreadMessageCount int64  `json:"unread_message_count"`
+	MatchedUserID      int32      `json:"matched_user_id"`
+	Name               string     `json:"name"`
+	FirstProfilePicURL string     `json:"first_profile_pic_url"`
+	IsOnline           bool       `json:"is_online"`
+	LastOnline         *time.Time `json:"last_online,omitempty"`
+	UnreadMessageCount int64      `json:"unread_message_count"`
 
 	LastEventTimestamp *time.Time `json:"last_event_timestamp,omitempty"`
 	LastEventUserID    *int32     `json:"last_event_user_id,omitempty"`
@@ -36,6 +38,7 @@ func GetMatchesHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	queries, errDb := db.GetDB()
 	if errDb != nil || queries == nil {
+		log.Println("ERROR: GetMatchesHandler: Database connection not available.")
 		utils.RespondWithJSON(w, http.StatusInternalServerError, GetMatchesResponse{Success: false, Message: "Database connection error", Matches: []MatchInfo{}})
 		return
 	}
@@ -52,7 +55,7 @@ func GetMatchesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	requestingUserID := int32(claims.UserID)
 
-	log.Printf("INFO: GetMatchesHandler: Fetching matches with last event for user %d", requestingUserID)
+	log.Printf("INFO: GetMatchesHandler: Fetching matches with details for user %d", requestingUserID)
 
 	dbMatches, err := queries.GetMatchesWithLastEvent(ctx, requestingUserID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -68,6 +71,8 @@ func GetMatchesHandler(w http.ResponseWriter, r *http.Request) {
 			MatchedUserID:      dbMatch.MatchedUserID,
 			Name:               buildFullName(dbMatch.MatchedUserName, dbMatch.MatchedUserLastName),
 			FirstProfilePicURL: getFirstMediaURL(dbMatch.MatchedUserMediaUrls),
+			IsOnline:           dbMatch.MatchedUserIsOnline,
+			LastOnline:         pgTimestampToTimePtr(dbMatch.MatchedUserLastOnline),
 			UnreadMessageCount: dbMatch.UnreadMessageCount,
 			LastEventTimestamp: nil,
 			LastEventUserID:    nil,
@@ -101,7 +106,7 @@ func GetMatchesHandler(w http.ResponseWriter, r *http.Request) {
 		responseMatches = append(responseMatches, match)
 	}
 
-	log.Printf("INFO: GetMatchesHandler: Found %d matches for user %d, processed with last event details.", len(responseMatches), requestingUserID)
+	log.Printf("INFO: GetMatchesHandler: Found %d matches for user %d.", len(responseMatches), requestingUserID)
 
 	utils.RespondWithJSON(w, http.StatusOK, GetMatchesResponse{
 		Success: true,
