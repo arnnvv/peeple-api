@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -40,19 +41,50 @@ var upgrader = websocket.Upgrader{
 }
 
 type Client struct {
-	hub    *Hub
-	conn   *websocket.Conn
-	Send   chan []byte
-	UserID int32
+	hub            *Hub
+	conn           *websocket.Conn
+	Send           chan []byte
+	UserID         int32
+	typingToUserID int32
+	typingMu       sync.Mutex
+}
+
+func (c *Client) sendStopTypingStatus(recipientID int32) {
+	if recipientID == 0 {
+		return
+	}
+	stopTypingMsg := WsMessage{
+		Type:         "typing_status",
+		TypingUserID: &c.UserID,
+		IsTyping:     PtrBool(false),
+	}
+	statusBytes, marshalErr := json.Marshal(stopTypingMsg)
+	if marshalErr != nil {
+		log.Printf("Client Helper ERROR: Failed to marshal stop typing status message for user %d -> %d: %v", c.UserID, recipientID, marshalErr)
+		return
+	}
+	_ = c.hub.SendToUser(recipientID, statusBytes)
 }
 
 func (c *Client) readPump() {
 	defer func() {
 		log.Printf("Client ReadPump: Unregistering and closing connection for user %d", c.UserID)
+
+		c.typingMu.Lock()
+		currentTypingTo := c.typingToUserID
+		c.typingToUserID = 0
+		c.typingMu.Unlock()
+
+		if currentTypingTo != 0 {
+			log.Printf("Client ReadPump: Sending final stop typing from %d to %d on disconnect.", c.UserID, currentTypingTo)
+			c.sendStopTypingStatus(currentTypingTo)
+		}
+
 		c.hub.unregister <- c
 		c.conn.Close()
 		log.Printf("Client ReadPump: Finished cleanup for user %d", c.UserID)
 	}()
+
 	c.conn.SetReadLimit(maxMessageSize)
 	_ = c.conn.SetReadDeadline(time.Now().Add(pongWait))
 	c.conn.SetPongHandler(func(string) error {
@@ -87,7 +119,8 @@ func (c *Client) readPump() {
 
 		ctx := context.Background()
 
-		if msg.Type == "chat_message" {
+		switch msg.Type {
+		case "chat_message":
 			if msg.RecipientUserID == nil || *msg.RecipientUserID <= 0 || *msg.RecipientUserID == c.UserID {
 				c.sendWsError("Invalid recipient user ID")
 				continue
@@ -144,7 +177,10 @@ func (c *Client) readPump() {
 					Valid: true,
 				}
 			}
-			mutualLikeParams := migrations.CheckMutualLikeExistsParams{LikerUserID: c.UserID, LikedUserID: recipientID}
+			mutualLikeParams := migrations.CheckMutualLikeExistsParams{
+				LikerUserID: c.UserID,
+				LikedUserID: recipientID,
+			}
 			mutualLike, errLikeCheck := queries.CheckMutualLikeExists(ctx, mutualLikeParams)
 			if errLikeCheck != nil {
 				log.Printf("Client ReadPump ERROR: Failed to check mutual like between %d and %d: %v", c.UserID, recipientID, errLikeCheck)
@@ -213,7 +249,7 @@ func (c *Client) readPump() {
 				}
 			}
 
-		} else if msg.Type == "react_to_message" {
+		case "react_to_message":
 			reactorUserID := c.UserID
 			if msg.MessageID == nil || *msg.MessageID <= 0 {
 				c.sendWsError("Valid message_id is required for reaction")
@@ -240,8 +276,7 @@ func (c *Client) readPump() {
 				c.sendWsError("You can only react to messages in your conversations.")
 				continue
 			}
-			existingReaction, err := queries.GetSingleReactionByUser(
-				ctx,
+			existingReaction, err := queries.GetSingleReactionByUser(ctx,
 				migrations.GetSingleReactionByUserParams{
 					MessageID: targetMessageID,
 					UserID:    reactorUserID,
@@ -257,7 +292,11 @@ func (c *Client) readPump() {
 			var dbErr error
 			ackContent := ""
 			if !reactionExists {
-				addParams := migrations.UpsertMessageReactionParams{MessageID: targetMessageID, UserID: reactorUserID, Emoji: reactionEmoji}
+				addParams := migrations.UpsertMessageReactionParams{
+					MessageID: targetMessageID,
+					UserID:    reactorUserID,
+					Emoji:     reactionEmoji,
+				}
 				_, dbErr = queries.UpsertMessageReaction(ctx, addParams)
 				if dbErr == nil {
 					finalEmoji = reactionEmoji
@@ -268,7 +307,10 @@ func (c *Client) readPump() {
 				}
 			} else {
 				if existingReaction.Emoji == reactionEmoji {
-					deleteParams := migrations.DeleteMessageReactionByUserParams{MessageID: targetMessageID, UserID: reactorUserID}
+					deleteParams := migrations.DeleteMessageReactionByUserParams{
+						MessageID: targetMessageID,
+						UserID:    reactorUserID,
+					}
 					_, dbErr = queries.DeleteMessageReactionByUser(ctx, deleteParams)
 					if dbErr == nil {
 						finalEmoji = ""
@@ -278,7 +320,11 @@ func (c *Client) readPump() {
 						log.Printf("Client ReadPump ERROR: Failed to delete reaction for user %d: %v", reactorUserID, dbErr)
 					}
 				} else {
-					updateParams := migrations.UpsertMessageReactionParams{MessageID: targetMessageID, UserID: reactorUserID, Emoji: reactionEmoji}
+					updateParams := migrations.UpsertMessageReactionParams{
+						MessageID: targetMessageID,
+						UserID:    reactorUserID,
+						Emoji:     reactionEmoji,
+					}
 					_, dbErr = queries.UpsertMessageReaction(ctx, updateParams)
 					if dbErr == nil {
 						finalEmoji = reactionEmoji
@@ -305,9 +351,8 @@ func (c *Client) readPump() {
 			case c.Send <- ackBytes:
 			default:
 			}
-			log.Printf("Client ReadPump INFO: Reaction processed for user %d on msg %d. Action: %s", reactorUserID, targetMessageID, ackContent)
 
-		} else if msg.Type == "mark_read" {
+		case "mark_read":
 			recipientUserID := c.UserID
 			if msg.OtherUserID == nil || *msg.OtherUserID <= 0 {
 				c.sendWsError("Valid other_user_id is required for mark_read")
@@ -335,7 +380,6 @@ func (c *Client) readPump() {
 				c.sendWsError(errMsg)
 				continue
 			}
-			log.Printf("Client ReadPump INFO: User %d marking messages from user %d as read up to message ID %d", recipientUserID, senderUserID, lastMessageID)
 			params := migrations.MarkMessagesAsReadUntilParams{
 				RecipientUserID: recipientUserID,
 				SenderUserID:    senderUserID,
@@ -380,9 +424,8 @@ func (c *Client) readPump() {
 				}
 			}
 
-		} else if msg.Type == "typing_event" {
+		case "typing_event":
 			senderUserID := c.UserID
-
 			if msg.RecipientUserID == nil || *msg.RecipientUserID <= 0 {
 				c.sendWsError("RecipientUserID is required for typing event")
 				continue
@@ -393,13 +436,14 @@ func (c *Client) readPump() {
 			}
 			recipientID := *msg.RecipientUserID
 			isTypingState := *msg.IsTyping
-
 			if recipientID == senderUserID {
 				c.sendWsError("Cannot send typing indicator to yourself")
 				continue
 			}
-
-			mutualLikeParams := migrations.CheckMutualLikeExistsParams{LikerUserID: senderUserID, LikedUserID: recipientID}
+			mutualLikeParams := migrations.CheckMutualLikeExistsParams{
+				LikerUserID: senderUserID,
+				LikedUserID: recipientID,
+			}
 			mutualLike, errLikeCheck := queries.CheckMutualLikeExists(ctx, mutualLikeParams)
 			if errLikeCheck != nil {
 				log.Printf("Client ReadPump ERROR: Failed to check mutual like for typing indicator (%d -> %d): %v", senderUserID, recipientID, errLikeCheck)
@@ -407,32 +451,51 @@ func (c *Client) readPump() {
 				continue
 			}
 			if !mutualLike.Valid || !mutualLike.Bool {
-				log.Printf("Client ReadPump WARN: Blocked typing indicator from %d to %d (no mutual like)", senderUserID, recipientID)
 				c.sendWsError("Can only send typing status to matched users")
 				continue
 			}
 
+			c.typingMu.Lock()
+			currentTypingTo := c.typingToUserID
+			var oldRecipientID int32 = 0
+
+			if isTypingState { // Start typing
+				if currentTypingTo != 0 && currentTypingTo != recipientID {
+					oldRecipientID = currentTypingTo
+					// log.Printf("Client ReadPump: User %d switching typing from %d to %d.", senderUserID, oldRecipientID, recipientID) // Can be noisy
+				}
+				c.typingToUserID = recipientID
+			} else { // Stop typing
+				if currentTypingTo == recipientID {
+					c.typingToUserID = 0 // Clear state only if stopping for the correct user
+				} else {
+					// log.Printf("Client ReadPump: User %d sent stop typing for %d, but was marked as typing to %d. Ignoring.", senderUserID, recipientID, currentTypingTo) // Can be noisy
+					c.typingMu.Unlock() // Unlock before skipping
+					continue
+				}
+			}
+			c.typingMu.Unlock() // Unlock mutex
+
+			// Send stop to old recipient if necessary (AFTER unlocking)
+			if oldRecipientID != 0 {
+				c.sendStopTypingStatus(oldRecipientID)
+			}
+
 			typingStatusMsg := WsMessage{
 				Type:         "typing_status",
-				TypingUserID: &senderUserID,  // Who is typing
-				IsTyping:     &isTypingState, // Are they starting or stopping?
+				TypingUserID: &senderUserID,
+				IsTyping:     &isTypingState,
 			}
 			statusBytes, marshalErr := json.Marshal(typingStatusMsg)
 			if marshalErr != nil {
 				log.Printf("Client ReadPump ERROR: Failed to marshal typing status message for user %d -> %d: %v", senderUserID, recipientID, marshalErr)
-				// Don't send error back to sender for this internal issue
 				continue
 			}
-
-			// Send the status ONLY to the recipient
 			if !c.hub.SendToUser(recipientID, statusBytes) {
-				// Recipient is offline, no need to do anything else or send error
-				log.Printf("Client ReadPump DEBUG: Typing indicator not sent (%d -> %d), recipient offline.", senderUserID, recipientID)
-			} else {
 				// log.Printf("Client ReadPump DEBUG: Sent typing status (%t) for user %d to user %d.", isTypingState, senderUserID, recipientID) // Can be noisy
 			}
 
-		} else {
+		default:
 			log.Printf("Client ReadPump: Received unhandled message type '%s' from user %d", msg.Type, c.UserID)
 			c.sendWsError("Unknown message type")
 		}
@@ -491,7 +554,10 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request, userID int32) {
 	go client.writePump()
 	go client.readPump()
 	log.Printf("ServeWs: Read and Write pumps started for user %d", userID)
-	infoMsg := WsMessage{Type: "info", Content: Ptr("Connected successfully.")}
+	infoMsg := WsMessage{
+		Type:    "info",
+		Content: Ptr("Connected successfully."),
+	}
 	infoBytes, _ := json.Marshal(infoMsg)
 	select {
 	case client.Send <- infoBytes:
@@ -501,7 +567,10 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request, userID int32) {
 }
 
 func (c *Client) sendWsError(errorMessage string) {
-	errMsg := WsMessage{Type: "error", Content: Ptr(errorMessage)}
+	errMsg := WsMessage{
+		Type:    "error",
+		Content: Ptr(errorMessage),
+	}
 	errBytes, err := json.Marshal(errMsg)
 	if err != nil {
 		log.Printf("Client ReadPump ERROR: Failed to marshal error message: %v", err)
@@ -512,4 +581,8 @@ func (c *Client) sendWsError(errorMessage string) {
 	default:
 		log.Printf("Client ReadPump: Send channel closed for user %d while sending error: %s", c.UserID, errorMessage)
 	}
+}
+
+func PtrBool(b bool) *bool {
+	return &b
 }
