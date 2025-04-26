@@ -1,5 +1,3 @@
--- FILE: db/queries.sql (Resolved)
-
 -- name: GetUserByID :one
 SELECT * FROM users
 WHERE id = $1 LIMIT 1;
@@ -17,17 +15,26 @@ INSERT INTO users (
 )
 RETURNING *;
 
--- name: UpdateUserLastOnline :exec
+-- name: SetUserOnline :exec
 UPDATE users
-SET last_online = NOW()
+SET is_online = true
+WHERE id = $1;
+
+-- name: SetUserOffline :exec
+UPDATE users
+SET is_online = false,
+    last_online = NOW()
 WHERE id = $1;
 
 -- name: GetUserLastOnline :one
 SELECT last_online FROM users
 WHERE id = $1 LIMIT 1;
 
+-- name: GetUserOnlineStatus :one
+SELECT is_online FROM users
+WHERE id = $1 LIMIT 1;
+
 -- name: GetPendingVerificationUsers :many
--- Fetches users whose verification status is 'pending'.
 SELECT * FROM users
 WHERE verification_status = $1; -- $1 should be 'pending'
 
@@ -167,10 +174,6 @@ RETURNING *;
 SELECT * FROM filters
 WHERE user_id = $1 LIMIT 1;
 
--- name: LogAppOpen :exec
-INSERT INTO app_open_logs (user_id)
-VALUES ($1);
-
 -- name: AddDislike :exec
 INSERT INTO dislikes (disliker_user_id, disliked_user_id)
 VALUES ($1, $2)
@@ -212,8 +215,6 @@ WHERE liker_user_id = $1
   AND created_at >= NOW() - INTERVAL '24 hours';
 
 -- name: GetHomeFeed :many
--- Retrieves the main feed based on user filters and location.
--- *** MODIFIED TO INCLUDE PROMPTS ***
 WITH RequestingUser AS (
     SELECT
         u.id, u.latitude, u.longitude, u.gender, u.date_of_birth, u.spotlight_active_until
@@ -223,7 +224,6 @@ WITH RequestingUser AS (
         f.user_id, f.who_you_want_to_see, f.radius_km, f.active_today, f.age_min, f.age_max
     FROM filters f WHERE f.user_id = $1
 ), AllPrompts AS (
-    -- Combine all prompts for all users into a single structure with category
     SELECT user_id, 'storyTime' as category, question::text, answer FROM story_time_prompts
     UNION ALL
     SELECT user_id, 'myType' as category, question::text, answer FROM my_type_prompts
@@ -232,7 +232,6 @@ WITH RequestingUser AS (
     UNION ALL
     SELECT user_id, 'dateVibes' as category, question::text, answer FROM date_vibes_prompts
 ), AggregatedPrompts AS (
-    -- Aggregate combined prompts into a JSONB array for each user
     SELECT
         user_id,
         jsonb_agg(jsonb_build_object('category', category, 'question', question, 'answer', answer)) as prompts
@@ -240,25 +239,23 @@ WITH RequestingUser AS (
     GROUP BY user_id
 )
 SELECT
-    target_user.*, -- Select all columns from the users table
-    -- Aggregate prompts for the target user, default to empty array if none
+    target_user.*,
     COALESCE(ap.prompts, '[]'::jsonb) as prompts,
-    -- Calculate distance
     haversine(ru.latitude, ru.longitude, target_user.latitude, target_user.longitude) AS distance_km
 FROM users AS target_user
 JOIN RequestingUser ru ON target_user.id != ru.id
 JOIN RequestingUserFilters rf ON ru.id = rf.user_id
 LEFT JOIN filters AS target_user_filters ON target_user.id = target_user_filters.user_id
-LEFT JOIN AggregatedPrompts ap ON target_user.id = ap.user_id -- Join with aggregated prompts
+LEFT JOIN AggregatedPrompts ap ON target_user.id = ap.user_id
 WHERE
-    target_user.latitude IS NOT NULL AND target_user.longitude IS NOT NULL -- Ensure target has location
-    AND ru.latitude IS NOT NULL AND ru.longitude IS NOT NULL             -- Ensure requesting user has location
-    AND ru.gender IS NOT NULL                                             -- Ensure requesting user has gender set
-    AND rf.who_you_want_to_see IS NOT NULL                                -- Ensure filter preference is set
-    AND rf.age_min IS NOT NULL AND rf.age_max IS NOT NULL                 -- Ensure age filters are set
+    target_user.latitude IS NOT NULL AND target_user.longitude IS NOT NULL
+    AND ru.latitude IS NOT NULL AND ru.longitude IS NOT NULL
+    AND ru.gender IS NOT NULL
+    AND rf.who_you_want_to_see IS NOT NULL
+    AND rf.age_min IS NOT NULL AND rf.age_max IS NOT NULL
     AND (rf.radius_km IS NULL OR haversine(ru.latitude, ru.longitude, target_user.latitude, target_user.longitude) <= rf.radius_km)
-    AND target_user.gender = rf.who_you_want_to_see -- Target gender matches filter
-    AND (target_user_filters.user_id IS NULL OR target_user_filters.who_you_want_to_see IS NULL OR target_user_filters.who_you_want_to_see = ru.gender) -- Target preferences allow requesting user's gender
+    AND target_user.gender = rf.who_you_want_to_see
+    AND (target_user_filters.user_id IS NULL OR target_user_filters.who_you_want_to_see IS NULL OR target_user_filters.who_you_want_to_see = ru.gender)
     AND target_user.date_of_birth IS NOT NULL
     AND EXTRACT(YEAR FROM AGE(target_user.date_of_birth)) BETWEEN rf.age_min AND rf.age_max
     AND (NOT rf.active_today OR EXISTS (
@@ -269,15 +266,15 @@ WHERE
     AND NOT EXISTS (SELECT 1 FROM dislikes d WHERE d.disliker_user_id = target_user.id AND d.disliked_user_id = ru.id)
     AND NOT EXISTS (SELECT 1 FROM likes l WHERE l.liker_user_id = ru.id AND l.liked_user_id = target_user.id)
 ORDER BY
-    CASE WHEN target_user.spotlight_active_until > NOW() THEN 0 ELSE 1 END ASC, -- Spotlight users first
+    CASE WHEN target_user.spotlight_active_until > NOW() THEN 0 ELSE 1 END ASC,
     distance_km ASC,
-    -- Use age difference calculation only if requesting user DOB is set
     CASE WHEN ru.date_of_birth IS NOT NULL THEN
       ABS(EXTRACT(YEAR FROM AGE(ru.date_of_birth)) - EXTRACT(YEAR FROM AGE(target_user.date_of_birth)))
     ELSE
-      NULL -- Or some other default ordering if DOB is missing
+      NULL
     END ASC NULLS LAST
-LIMIT $2; -- Param $2 is the feed batch size (e.g., 15)
+LIMIT $2;
+
 -- name: GetQuickFeed :many
 -- Retrieves a small feed based purely on proximity and opposite gender.
 -- Parameters: $1=latitude, $2=longitude (of requesting user), $3=requesting_user_id, $4=gender_to_show, $5=limit
@@ -507,6 +504,7 @@ SELECT
     target_user.name AS matched_user_name,
     target_user.last_name AS matched_user_last_name,
     target_user.media_urls AS matched_user_media_urls,
+    target_user.is_online AS matched_user_is_online,
     last_event.event_at AS last_event_timestamp,
     COALESCE(last_event.event_user_id, 0) AS last_event_user_id,
     COALESCE(last_event.event_type, '') AS last_event_type,
@@ -574,3 +572,8 @@ JOIN
   AND l1.liked_user_id = l2.liker_user_id
 WHERE
   l1.liker_user_id = $1;
+
+-- name: UpdateLastOnline :exec
+UPDATE users
+SET last_online = NOW()
+WHERE id = $1;

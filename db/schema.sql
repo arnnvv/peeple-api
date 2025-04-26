@@ -131,7 +131,8 @@ CREATE TABLE users (
     audio_prompt_question audio_prompt,
     audio_prompt_answer TEXT,
     spotlight_active_until TIMESTAMPTZ NULL,
-    last_online TIMESTAMPTZ
+    last_online TIMESTAMPTZ,
+    is_online BOOLEAN NOT NULL DEFAULT false
 );
 CREATE INDEX idx_users_spotlight_active ON users (spotlight_active_until) WHERE spotlight_active_until IS NOT NULL;
 CREATE INDEX idx_users_email ON users (email);
