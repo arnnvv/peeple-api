@@ -56,29 +56,29 @@ func GetConversationHandler(w http.ResponseWriter, r *http.Request) {
 	queries, errDb := db.GetDB()
 	if errDb != nil || queries == nil {
 		utils.RespondWithJSON(w, http.StatusInternalServerError,
-		GetConversationResponse{
-			Success: false,
-			Message: "Database connection error",
-		})
+			GetConversationResponse{
+				Success: false,
+				Message: "Database connection error",
+			})
 		return
 	}
 
 	if r.Method != http.MethodPost {
 		utils.RespondWithJSON(w, http.StatusMethodNotAllowed,
-		GetConversationResponse{
-			Success: false,
-			Message: "Method Not Allowed: Use POST",
-		})
+			GetConversationResponse{
+				Success: false,
+				Message: "Method Not Allowed: Use POST",
+			})
 		return
 	}
 
 	claims, ok := ctx.Value(token.ClaimsContextKey).(*token.Claims)
 	if !ok || claims == nil || claims.UserID <= 0 {
 		utils.RespondWithJSON(w, http.StatusUnauthorized,
-		GetConversationResponse{
-			Success: false,
-			Message: "Authentication required",
-		})
+			GetConversationResponse{
+				Success: false,
+				Message: "Authentication required",
+			})
 		return
 	}
 	requestingUserID := int32(claims.UserID)
@@ -86,10 +86,10 @@ func GetConversationHandler(w http.ResponseWriter, r *http.Request) {
 	var req GetConversationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		utils.RespondWithJSON(w, http.StatusBadRequest,
-		GetConversationResponse{
-			Success: false,
-			Message: "Invalid request body format",
-		})
+			GetConversationResponse{
+				Success: false,
+				Message: "Invalid request body format",
+			})
 		return
 	}
 	defer r.Body.Close()
@@ -97,10 +97,10 @@ func GetConversationHandler(w http.ResponseWriter, r *http.Request) {
 
 	if otherUserID <= 0 || otherUserID == requestingUserID {
 		utils.RespondWithJSON(w, http.StatusBadRequest,
-		GetConversationResponse{
-			Success: false,
-			Message: "Valid other_user_id (different from self) is required",
-		})
+			GetConversationResponse{
+				Success: false,
+				Message: "Valid other_user_id (different from self) is required",
+			})
 		return
 	}
 
@@ -108,17 +108,17 @@ func GetConversationHandler(w http.ResponseWriter, r *http.Request) {
 	if userErr != nil {
 		if errors.Is(userErr, pgx.ErrNoRows) {
 			utils.RespondWithJSON(w, http.StatusNotFound,
-			GetConversationResponse{
-				Success: false,
-				Message: "The other user does not exist",
-			})
+				GetConversationResponse{
+					Success: false,
+					Message: "The other user does not exist",
+				})
 		} else {
 			log.Printf("ERROR: GetConversationHandler: Error fetching other user %d data: %v", otherUserID, userErr)
 			utils.RespondWithJSON(w, http.StatusInternalServerError,
-			GetConversationResponse{
-				Success: false,
-				Message: "Error checking user existence",
-			})
+				GetConversationResponse{
+					Success: false,
+					Message: "Error checking user existence",
+				})
 		}
 		return
 	}
@@ -128,19 +128,19 @@ func GetConversationHandler(w http.ResponseWriter, r *http.Request) {
 	if checkErr != nil {
 		log.Printf("ERROR: GetConversationHandler: Failed to check mutual like between %d and %d: %v", requestingUserID, otherUserID, checkErr)
 		utils.RespondWithJSON(w, http.StatusInternalServerError,
-		GetConversationResponse{
-			Success: false,
-			Message: "Error checking match status",
-		})
+			GetConversationResponse{
+				Success: false,
+				Message: "Error checking match status",
+			})
 		return
 	}
 	if !mutualLikeResult.Valid || !mutualLikeResult.Bool {
 		utils.RespondWithJSON(w, http.StatusForbidden,
-		GetConversationResponse{
-			Success: false,
-			Message: "You can only view conversations with users you have matched with.",
-			Messages: []ConversationMessageResponse{},
-		})
+			GetConversationResponse{
+				Success:  false,
+				Message:  "You can only view conversations with users you have matched with.",
+				Messages: []ConversationMessageResponse{},
+			})
 		return
 	}
 
@@ -154,10 +154,10 @@ func GetConversationHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		log.Printf("ERROR: GetConversationHandler: queries.GetConversationMessages failed: %v", err)
 		utils.RespondWithJSON(w, http.StatusInternalServerError,
-		GetConversationResponse{
-			Success: false,
-			Message: "Error retrieving conversation",
-		})
+			GetConversationResponse{
+				Success: false,
+				Message: "Error retrieving conversation",
+			})
 		return
 	}
 

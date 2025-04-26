@@ -32,6 +32,9 @@ type WsMessage struct {
 
 	ReaderUserID *int32 `json:"reader_user_id,omitempty"`
 
+	IsTyping     *bool  `json:"is_typing,omitempty"`
+	TypingUserID *int32 `json:"typing_user_id,omitempty"`
+
 	Content *string `json:"content,omitempty"`
 	Count   *int64  `json:"count,omitempty"`
 }
