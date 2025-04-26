@@ -505,6 +505,7 @@ SELECT
     target_user.last_name AS matched_user_last_name,
     target_user.media_urls AS matched_user_media_urls,
     target_user.is_online AS matched_user_is_online,
+    target_user.last_online AS matched_user_last_online,
     last_event.event_at AS last_event_timestamp,
     COALESCE(last_event.event_user_id, 0) AS last_event_user_id,
     COALESCE(last_event.event_type, '') AS last_event_type,
@@ -520,24 +521,30 @@ SELECT
 FROM
     likes l1
 JOIN
-    users target_user ON l1.liked_user_id = target_user.id
+    users target_user
+    ON l1.liked_user_id = target_user.id
 JOIN
-    likes l2 ON l1.liked_user_id = l2.liker_user_id
-              AND l1.liker_user_id = l2.liked_user_id
+    likes l2
+    ON l1.liked_user_id = l2.liker_user_id
+   AND l1.liker_user_id = l2.liked_user_id
 LEFT JOIN LATERAL (
     (
         SELECT
             cm.sent_at AS event_at,
             cm.sender_user_id AS event_user_id,
-            CASE WHEN cm.message_text IS NOT NULL THEN 'text' ELSE 'media' END AS event_type,
+            CASE
+                WHEN cm.message_text IS NOT NULL THEN 'text'
+                ELSE 'media'
+            END AS event_type,
             COALESCE(cm.message_text, cm.media_type) AS event_content,
             cm.media_url AS event_extra
         FROM chat_messages cm
-        WHERE (cm.sender_user_id = l1.liker_user_id AND cm.recipient_user_id = l1.liked_user_id)
-           OR (cm.sender_user_id = l1.liked_user_id AND cm.recipient_user_id = l1.liker_user_id)
-
+        WHERE
+            (cm.sender_user_id = l1.liker_user_id AND cm.recipient_user_id = l1.liked_user_id)
+            OR (cm.sender_user_id = l1.liked_user_id AND cm.recipient_user_id = l1.liker_user_id)
+        
         UNION ALL
-
+        
         SELECT
             mr.updated_at AS event_at,
             mr.user_id AS event_user_id,
@@ -545,12 +552,14 @@ LEFT JOIN LATERAL (
             mr.emoji AS event_content,
             NULL AS event_extra
         FROM message_reactions mr
-        JOIN chat_messages cm_react ON mr.message_id = cm_react.id
-        WHERE (mr.user_id = l1.liker_user_id OR mr.user_id = l1.liked_user_id)
-          AND (
-                  (cm_react.sender_user_id = l1.liker_user_id AND cm_react.recipient_user_id = l1.liked_user_id)
-               OR (cm_react.sender_user_id = l1.liked_user_id AND cm_react.recipient_user_id = l1.liker_user_id)
-              )
+        JOIN chat_messages cm_react
+            ON mr.message_id = cm_react.id
+        WHERE
+            (mr.user_id = l1.liker_user_id OR mr.user_id = l1.liked_user_id)
+            AND (
+                (cm_react.sender_user_id = l1.liker_user_id AND cm_react.recipient_user_id = l1.liked_user_id)
+                OR (cm_react.sender_user_id = l1.liked_user_id AND cm_react.recipient_user_id = l1.liker_user_id)
+            )
     )
     ORDER BY event_at DESC
     LIMIT 1
