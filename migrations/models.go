@@ -845,6 +845,7 @@ type User struct {
 	AudioPromptAnswer    pgtype.Text
 	SpotlightActiveUntil pgtype.Timestamptz
 	LastOnline           pgtype.Timestamptz
+	IsOnline             bool
 }
 
 type UserConsumable struct {

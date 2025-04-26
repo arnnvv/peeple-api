@@ -36,7 +36,7 @@ func LogAppOpenHandler(w http.ResponseWriter, r *http.Request) {
 	userID := int32(claims.UserID)
 
 	log.Printf("LogAppOpenHandler: Logging app open for user %d", userID)
-	err := queries.LogAppOpen(ctx, userID)
+	err := queries.UpdateLastOnline(ctx, userID)
 	if err != nil {
 		log.Printf("LogAppOpenHandler: Error logging app open for user %d: %v", userID, err)
 		utils.RespondWithJSON(w, http.StatusInternalServerError, AppOpenResponse{
