@@ -220,7 +220,8 @@ func (c *Client) readPump() {
 				c.sendWsError("You can only react to messages in your conversations.")
 				continue
 			}
-			existingReaction, err := queries.GetSingleReactionByUser(context.Background(),
+			existingReaction, err := queries.GetSingleReactionByUser(
+				context.Background(),
 				migrations.GetSingleReactionByUserParams{
 					MessageID: targetMessageID,
 					UserID:    reactorUserID,
@@ -300,6 +301,21 @@ func (c *Client) readPump() {
 				c.sendWsError("Cannot mark messages from yourself as read this way")
 				continue
 			}
+
+			log.Printf("Client ReadPump DEBUG: Validating existence of mark_read boundary message ID %d", lastMessageID)
+			_, errCheck := queries.GetMessageSenderRecipient(context.Background(), lastMessageID)
+			if errCheck != nil {
+				errMsg := "Error validating message ID for mark read"
+				if errors.Is(errCheck, pgx.ErrNoRows) || errors.Is(errCheck, sql.ErrNoRows) {
+					errMsg = fmt.Sprintf("Invalid message ID (%d) provided for mark read.", lastMessageID)
+					log.Printf("Client ReadPump WARN: %s (User: %d)", errMsg, c.UserID)
+				} else {
+					log.Printf("Client ReadPump ERROR: Failed to check existence for mark_read message ID %d: %v", lastMessageID, errCheck)
+				}
+				c.sendWsError(errMsg)
+				continue
+			}
+			log.Printf("Client ReadPump DEBUG: Boundary message ID %d exists.", lastMessageID)
 
 			log.Printf("Client ReadPump INFO: User %d marking messages from user %d as read up to message ID %d",
 				recipientUserID, senderUserID, lastMessageID)
