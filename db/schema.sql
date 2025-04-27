@@ -195,13 +195,6 @@ BEFORE UPDATE ON filters
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TABLE app_open_logs (
-    id BIGSERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    opened_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE INDEX idx_app_open_logs_user_time ON app_open_logs (user_id, opened_at DESC);
-
 CREATE OR REPLACE FUNCTION haversine(lat1 float, lon1 float, lat2 float, lon2 float)
 RETURNS float AS $$
 DECLARE

@@ -21,19 +21,11 @@ SET row_security = off;
 -- Data for Name: users; Type: TABLE DATA; Schema: public; Owner: neondb_owner
 --
 
-COPY public.users (id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until, last_online) FROM stdin;
-17	2025-04-21 15:02:53.690116+00	kushal		ayushiitroorkie@gmail.com	2006-05-05	29.8665951	77.8999037	man	longTermOpenShort	66	Lucknow	Athlete	Nift	buddhist	no	no	{https://peeple1.s3.ap-south-1.amazonaws.com/uploads/17/2025-04-21/IMG_20250421_185657_071.jpg,https://peeple1.s3.ap-south-1.amazonaws.com/uploads/17/2025-04-21/IMG_20250421_185656_900.jpg,https://peeple1.s3.ap-south-1.amazonaws.com/uploads/17/2025-04-21/IMG_20250421_185656_897.jpg}	false	\N	user	cookWithMe	https://peeple1.s3.ap-south-1.amazonaws.com/users/17/audio/cookwithme/1745247970793197186-voice_prompt_1745247961233.m4a	\N	\N
-18	2025-04-21 15:06:45.935222+00	mansi		peeple.help@gmail.com	2004-11-05	29.8665951	77.8999037	woman	shortTerm	64	Mohali	Doctor	SMS Jaipur	sikh	sometimes	no	{https://peeple1.s3.ap-south-1.amazonaws.com/uploads/18/2025-04-21/IMG_20250421_185656_822.jpg,https://peeple1.s3.ap-south-1.amazonaws.com/uploads/18/2025-04-21/IMG_20250421_185657_345.jpg,https://peeple1.s3.ap-south-1.amazonaws.com/uploads/18/2025-04-21/IMG_20250421_185656_987.jpg}	false	\N	user	dontHateMeIfI	https://peeple1.s3.ap-south-1.amazonaws.com/users/18/audio/donthatemeifi/1745248198476168003-voice_prompt_1745248186537.m4a	\N	2025-04-24 10:37:21.481426+00
-12	2025-04-20 13:53:03.112973+00	shruti		sg64776@gmail.com	2005-05-05	29.8666161	77.8998275	woman	longTerm	62	Udaipur	Footballer	IIT Madras	zoroastrian	no	yes	{https://peeple1.s3.ap-south-1.amazonaws.com/uploads/12/2025-04-21/IMG_20250421_185657_342.jpg,https://peeple1.s3.ap-south-1.amazonaws.com/uploads/12/2025-04-21/IMG_20250421_185656_748.jpg,https://peeple1.s3.ap-south-1.amazonaws.com/uploads/12/2025-04-21/IMG_20250421_190407_527.jpg}	false	\N	user	chooseOurFirstDate	https://peeple1.s3.ap-south-1.amazonaws.com/users/12/audio/chooseourfirstdate/1745157284840473795-voice_prompt_1745157272575.m4a	\N	2025-04-26 02:57:01.384749+00
-13	2025-04-20 13:55:53.306309+00	Ayush		ayush_g@ar.iitr.ac.in	2004-05-05	29.8666145	77.8999064	man	longTermOpenShort	61	Roorkee	Carpenter	DTU	jain	yes	no	{https://peeple1.s3.ap-south-1.amazonaws.com/uploads/13/2025-04-21/IMG_20250421_185709_657.jpg,https://peeple1.s3.ap-south-1.amazonaws.com/uploads/13/2025-04-21/IMG_20250421_185708_857.jpg,https://peeple1.s3.ap-south-1.amazonaws.com/uploads/13/2025-04-21/IMG_20250421_185657_008.jpg}	false	\N	user	changeMyMindAbout	https://peeple1.s3.ap-south-1.amazonaws.com/users/13/audio/changemymindabout/1745157853104918363-voice_prompt_1745157819780.m4a	\N	2025-04-26 11:35:34.672609+00
-\.
-
-
---
--- Data for Name: app_open_logs; Type: TABLE DATA; Schema: public; Owner: neondb_owner
---
-
-COPY public.app_open_logs (id, user_id, opened_at) FROM stdin;
+COPY public.users (id, created_at, name, last_name, email, date_of_birth, latitude, longitude, gender, dating_intention, height, hometown, job_title, education, religious_beliefs, drinking_habit, smoking_habit, media_urls, verification_status, verification_pic, role, audio_prompt_question, audio_prompt_answer, spotlight_active_until, last_online, is_online) FROM stdin;
+17	2025-04-21 15:02:53.690116+00	kushal		ayushiitroorkie@gmail.com	2006-05-05	29.8665951	77.8999037	man	longTermOpenShort	66	Lucknow	Athlete	Nift	buddhist	no	no	{https://peeple1.s3.ap-south-1.amazonaws.com/uploads/17/2025-04-21/IMG_20250421_185657_071.jpg,https://peeple1.s3.ap-south-1.amazonaws.com/uploads/17/2025-04-21/IMG_20250421_185656_900.jpg,https://peeple1.s3.ap-south-1.amazonaws.com/uploads/17/2025-04-21/IMG_20250421_185656_897.jpg}	false	\N	user	cookWithMe	https://peeple1.s3.ap-south-1.amazonaws.com/users/17/audio/cookwithme/1745247970793197186-voice_prompt_1745247961233.m4a	\N	\N	f
+18	2025-04-21 15:06:45.935222+00	mansi		peeple.help@gmail.com	2004-11-05	29.8665951	77.8999037	woman	shortTerm	64	Mohali	Doctor	SMS Jaipur	sikh	sometimes	no	{https://peeple1.s3.ap-south-1.amazonaws.com/uploads/18/2025-04-21/IMG_20250421_185656_822.jpg,https://peeple1.s3.ap-south-1.amazonaws.com/uploads/18/2025-04-21/IMG_20250421_185657_345.jpg,https://peeple1.s3.ap-south-1.amazonaws.com/uploads/18/2025-04-21/IMG_20250421_185656_987.jpg}	false	\N	user	dontHateMeIfI	https://peeple1.s3.ap-south-1.amazonaws.com/users/18/audio/donthatemeifi/1745248198476168003-voice_prompt_1745248186537.m4a	\N	2025-04-24 10:37:21.481426+00	f
+13	2025-04-20 13:55:53.306309+00	Ayush		ayush_g@ar.iitr.ac.in	2004-05-05	29.8666145	77.8999064	man	longTermOpenShort	61	Roorkee	Carpenter	DTU	jain	yes	no	{https://peeple1.s3.ap-south-1.amazonaws.com/uploads/13/2025-04-21/IMG_20250421_185709_657.jpg,https://peeple1.s3.ap-south-1.amazonaws.com/uploads/13/2025-04-21/IMG_20250421_185708_857.jpg,https://peeple1.s3.ap-south-1.amazonaws.com/uploads/13/2025-04-21/IMG_20250421_185657_008.jpg}	false	\N	user	changeMyMindAbout	https://peeple1.s3.ap-south-1.amazonaws.com/users/13/audio/changemymindabout/1745157853104918363-voice_prompt_1745157819780.m4a	\N	2025-04-27 00:30:40.677144+00	f
+12	2025-04-20 13:53:03.112973+00	shruti		sg64776@gmail.com	2005-05-05	29.8666161	77.8998275	woman	longTerm	62	Udaipur	Footballer	IIT Madras	zoroastrian	no	yes	{https://peeple1.s3.ap-south-1.amazonaws.com/uploads/12/2025-04-21/IMG_20250421_185657_342.jpg,https://peeple1.s3.ap-south-1.amazonaws.com/uploads/12/2025-04-21/IMG_20250421_185656_748.jpg,https://peeple1.s3.ap-south-1.amazonaws.com/uploads/12/2025-04-21/IMG_20250421_190407_527.jpg}	false	\N	user	chooseOurFirstDate	https://peeple1.s3.ap-south-1.amazonaws.com/users/12/audio/chooseourfirstdate/1745157284840473795-voice_prompt_1745157272575.m4a	\N	2025-04-27 00:30:42.578227+00	f
 \.
 
 
@@ -163,13 +155,6 @@ COPY public.user_consumables (user_id, consumable_type, quantity, updated_at) FR
 
 COPY public.user_subscriptions (id, user_id, feature_type, activated_at, expires_at, created_at) FROM stdin;
 \.
-
-
---
--- Name: app_open_logs_id_seq; Type: SEQUENCE SET; Schema: public; Owner: neondb_owner
---
-
-SELECT pg_catalog.setval('public.app_open_logs_id_seq', 1, false);
 
 
 --
