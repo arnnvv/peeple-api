@@ -659,10 +659,9 @@ WHERE
     AND (target_user_filters.user_id IS NULL OR target_user_filters.who_you_want_to_see IS NULL OR target_user_filters.who_you_want_to_see = ru.gender)
     AND target_user.date_of_birth IS NOT NULL
     AND EXTRACT(YEAR FROM AGE(target_user.date_of_birth)) BETWEEN rf.age_min AND rf.age_max
-    AND (NOT rf.active_today OR EXISTS (
-            SELECT 1 FROM app_open_logs aol
-            WHERE aol.user_id = target_user.id AND aol.opened_at >= NOW() - INTERVAL '24 hours'
-        ))
+    AND (NOT rf.active_today OR (
+		target_user.last_online IS NOT NULL AND target_user.last_online >= NOW() - INTERVAL '24 hours'
+    ))
     AND NOT EXISTS (SELECT 1 FROM dislikes d WHERE d.disliker_user_id = ru.id AND d.disliked_user_id = target_user.id)
     AND NOT EXISTS (SELECT 1 FROM dislikes d WHERE d.disliker_user_id = target_user.id AND d.disliked_user_id = ru.id)
     AND NOT EXISTS (SELECT 1 FROM likes l WHERE l.liker_user_id = ru.id AND l.liked_user_id = target_user.id)
@@ -767,8 +766,8 @@ SELECT
     comment,
     interaction_type
 FROM likes
-WHERE liker_user_id = $1 -- The user who sent the like
-AND liked_user_id = $2   -- The user who received the like (current user)
+WHERE liker_user_id = $1
+AND liked_user_id = $2
 LIMIT 1
 `
 
@@ -1088,12 +1087,12 @@ SELECT
     haversine($1, $2, target_user.latitude, target_user.longitude) AS distance_km
 FROM users AS target_user
 WHERE
-      target_user.id != $3 -- Exclude self
+      target_user.id != $3
   AND target_user.latitude IS NOT NULL
   AND target_user.longitude IS NOT NULL
-  AND target_user.gender = $4 -- Filter by the OPPOSITE gender passed as param
-  AND target_user.name IS NOT NULL AND target_user.name != '' -- Basic profile check
-  AND target_user.date_of_birth IS NOT NULL                  -- Basic profile check
+  AND target_user.gender = $4
+  AND target_user.name IS NOT NULL AND target_user.name != ''
+  AND target_user.date_of_birth IS NOT NULL
 ORDER BY
     distance_km ASC
 LIMIT $5
@@ -1137,8 +1136,6 @@ type GetQuickFeedRow struct {
 	DistanceKm           float64
 }
 
-// Retrieves a small feed based purely on proximity and opposite gender.
-// Parameters: $1=latitude, $2=longitude (of requesting user), $3=requesting_user_id, $4=gender_to_show, $5=limit
 func (q *Queries) GetQuickFeed(ctx context.Context, arg GetQuickFeedParams) ([]GetQuickFeedRow, error) {
 	rows, err := q.db.Query(ctx, getQuickFeed,
 		arg.Lat1,
