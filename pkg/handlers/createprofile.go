@@ -388,13 +388,6 @@ func derefString(s *string) string {
 	return ""
 }
 
-func derefFloat64(f *float64) float64 {
-	if f != nil {
-		return *f
-	}
-	return 0.0
-}
-
 var heightRegex = regexp.MustCompile(`^[4-6]'([0-9]|1[0-1])"$`)
 
 func parseHeightString(heightStr string) (float64, error) {
@@ -439,7 +432,6 @@ func parseHeightString(heightStr string) (float64, error) {
 // Validates the fields handled by *this* endpoint (/api/profile)
 func validatePartialProfile(params migrations.UpdateUserProfileParams, prompts []promptRequest) error {
 	fmt.Println("\n=== Starting Partial Profile Validation ===")
-	defer fmt.Println("=== End Partial Profile Validation ===\n")
 
 	// Basic Info (Name, DOB required for this stage)
 	if !params.Name.Valid || len(params.Name.String) == 0 {

@@ -37,19 +37,19 @@ var (
 	testUser13Token    string // Ayush
 	testUser12Token    string // Shruti
 	testUserAdminToken string // Assume user 18 (Mansi) is made admin for tests
-	testUser17Token string // Kushal
-	testUser18Token string // Mansi (will be made admin)
+	testUser17Token    string // Kushal
+	testUser18Token    string // Mansi (will be made admin)
 )
 
 const (
-	testPort          = "8089" // Use a different port for tests
-	testUserID13      = 13     // Ayush
-	testUserID12      = 12     // Shruti
-	testUserID17      = 17     // Kushal
-	testUserID18      = 18     // Mansi (Admin)
-	testWaitServer    = 3 * time.Second
-	wsReadWait        = 10 * time.Second // Timeout for reading ws message
-	wsWriteWait       = 10 * time.Second
+	testPort           = "8089" // Use a different port for tests
+	testUserID13       = 13     // Ayush
+	testUserID12       = 12     // Shruti
+	testUserID17       = 17     // Kushal
+	testUserID18       = 18     // Mansi (Admin)
+	testWaitServer     = 3 * time.Second
+	wsReadWait         = 10 * time.Second // Timeout for reading ws message
+	wsWriteWait        = 10 * time.Second
 	defaultTestTimeout = 15 * time.Second
 )
 
@@ -150,7 +150,6 @@ func TestMain(m *testing.M) {
 	os.Exit(exitCode)
 }
 
-
 func setupTestDatabase(dbURL string) error {
 	log.Printf("Connecting to TEST database: %s\n", strings.Split(dbURL, "@")[1])
 	config, err := pgxpool.ParseConfig(dbURL)
@@ -173,62 +172,6 @@ func setupTestDatabase(dbURL string) error {
 		return fmt.Errorf("failed to ping test db: %w", err)
 	}
 	log.Println("Test database connected.")
-
-	err = cleanTestDatabase(ctx)
-	if err != nil {
-		testDBPool.Close()
-		return fmt.Errorf("failed to clean test database: %w", err)
-	}
-
-	log.Println("Applying database schema...")
-	schemaSQL, err := os.ReadFile("db/schema.sql")
-	if err != nil {
-		testDBPool.Close()
-		return fmt.Errorf("failed to read schema.sql: %w", err)
-	}
-	_, err = testDBPool.Exec(ctx, string(schemaSQL))
-	if err != nil {
-		testDBPool.Close()
-		return fmt.Errorf("failed to execute schema.sql: %w", err)
-	}
-	log.Println("Database schema applied.")
-
-	log.Println("Applying seed data...")
-	seedSQL, err := os.ReadFile("seed.sql")
-	if err != nil {
-		testDBPool.Close()
-		return fmt.Errorf("failed to read seed.sql: %w", err)
-	}
-	_, err = testDBPool.Exec(ctx, string(seedSQL))
-	if err != nil {
-		testDBPool.Close()
-		return fmt.Errorf("failed to execute seed.sql: %w", err)
-	}
-	log.Println("Seed data applied.")
-
-	return nil
-}
-
-func cleanTestDatabase(ctx context.Context) error {
-	log.Println("Cleaning test database (dropping public schema)...")
-	_, err := testDBPool.Exec(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public;`)
-	if err != nil {
-		log.Printf("WARN: Failed to drop public schema (%v), attempting TRUNCATE...", err)
-		tables := []string{
-			"message_reactions", "reports", "chat_messages", "user_consumables",
-			"user_subscriptions", "likes", "dislikes", "filters",
-			"date_vibes_prompts", "getting_personal_prompts", "my_type_prompts",
-			"story_time_prompts", "users",
-		}
-		truncateCmd := fmt.Sprintf("TRUNCATE TABLE %s RESTART IDENTITY CASCADE;", strings.Join(tables, ", "))
-		_, err = testDBPool.Exec(ctx, truncateCmd)
-		if err != nil {
-			return fmt.Errorf("failed to truncate tables: %w", err)
-		}
-		log.Println("Truncated tables instead of dropping schema.")
-	} else {
-		log.Println("Public schema dropped and recreated.")
-	}
 	return nil
 }
 
@@ -336,7 +279,6 @@ func assertErrorResponse(t *testing.T, resp *http.Response, expectedCode int, ex
 		return
 	}
 
-
 	success, ok := result["success"].(bool)
 	assert.True(t, ok, "Error response should have a boolean 'success' field")
 	assert.False(t, success, "Expected 'success' field to be false in error response")
@@ -415,7 +357,6 @@ func assertWsMessageType(t *testing.T, conn *websocket.Conn, expectedType string
 	require.Equal(t, expectedType, receivedMsg.Type, "Unexpected WebSocket message type received")
 	return receivedMsg
 }
-
 
 func TestAuthEndpoints(t *testing.T) {
 	t.Parallel()
@@ -575,7 +516,6 @@ func TestFeedEndpoints(t *testing.T) {
 
 			_, okPrompts := profileMap["prompts"].([]any)
 			assert.True(t, okPrompts || profileMap["prompts"] == nil || profileMap["prompts"] == "[]", "Profile should have prompts array or null/empty")
-
 
 		}
 		assert.True(t, foundUser18, "User 18 (potential match) should be in User 13's feed")
@@ -843,7 +783,6 @@ func TestChatAndRelatedEndpoints(t *testing.T) {
 	})
 	require.NotZero(t, lastMsgID13to12, "Failed to get last message ID for subsequent tests")
 
-
 	t.Run("WebSocket_SendReaction_12_to_13s_Message", func(t *testing.T) {
 		reactionEmoji := "😊"
 		msgToSend := ws.WsMessage{
@@ -894,7 +833,6 @@ func TestChatAndRelatedEndpoints(t *testing.T) {
 		assert.False(t, *statusMsgStop.IsTyping)
 	})
 
-
 	t.Run("WebSocket_MarkRead_12_marks_13s_Message", func(t *testing.T) {
 		msgToSend := ws.WsMessage{
 			Type:        "mark_read",
@@ -919,7 +857,6 @@ func TestChatAndRelatedEndpoints(t *testing.T) {
 		assert.Equal(t, lastMsgID13to12, *updateMsg.MessageID)
 	})
 
-
 	t.Run("GetConversation_13_with_12", func(t *testing.T) {
 		reqBody := handlers.GetConversationRequest{OtherUserID: testUserID12}
 		jsonBody, _ := json.Marshal(reqBody)
@@ -939,7 +876,6 @@ func TestChatAndRelatedEndpoints(t *testing.T) {
 		assert.JSONEq(t, `{"😊": 1}`, string(lastMsg.Reactions), "Reactions mismatch")
 		assert.Nil(t, lastMsg.CurrentUserReaction, "Current user (13) did not react")
 	})
-
 
 	t.Run("GetUnreadCount_User13", func(t *testing.T) {
 		req := makeRequest(t, "GET", "/api/unread-chat-count", &testUser13Token, nil)
@@ -971,7 +907,6 @@ func TestChatAndRelatedEndpoints(t *testing.T) {
 
 func TestAdminEndpoints(t *testing.T) {
 	t.Parallel()
-
 
 	t.Run("GetPendingVerifications_Admin", func(t *testing.T) {
 		req := makeRequest(t, "GET", "/api/admin/verifications", &testUserAdminToken, nil)
@@ -1136,7 +1071,6 @@ func TestMiscEndpoints(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "testing", string(bodyBytes))
 	})
-
 
 }
 
