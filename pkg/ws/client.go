@@ -41,12 +41,14 @@ var upgrader = websocket.Upgrader{
 }
 
 type Client struct {
-	hub            *Hub
-	conn           *websocket.Conn
-	Send           chan []byte
-	UserID         int32
-	typingToUserID int32
-	typingMu       sync.Mutex
+	hub               *Hub
+	conn              *websocket.Conn
+	Send              chan []byte
+	UserID            int32
+	typingToUserID    int32
+	typingMu          sync.Mutex
+	recordingToUserID int32
+	recordingMu       sync.Mutex
 }
 
 func (c *Client) sendStopTypingStatus(recipientID int32) {
@@ -66,6 +68,23 @@ func (c *Client) sendStopTypingStatus(recipientID int32) {
 	_ = c.hub.SendToUser(recipientID, statusBytes)
 }
 
+func (c *Client) sendStopRecordingStatus(recipientID int32) {
+	if recipientID == 0 {
+		return
+	}
+	stopRecordingMsg := WsMessage{
+		Type:            "recording_status",
+		RecordingUserID: &c.UserID,
+		IsRecording:     PtrBool(false),
+	}
+	statusBytes, marshalErr := json.Marshal(stopRecordingMsg)
+	if marshalErr != nil {
+		log.Printf("Client Helper ERROR: Failed to marshal stop recording status message for user %d -> %d: %v", c.UserID, recipientID, marshalErr)
+		return
+	}
+	_ = c.hub.SendToUser(recipientID, statusBytes)
+}
+
 func (c *Client) readPump() {
 	defer func() {
 		log.Printf("Client ReadPump: Unregistering and closing connection for user %d", c.UserID)
@@ -78,6 +97,15 @@ func (c *Client) readPump() {
 		if currentTypingTo != 0 {
 			log.Printf("Client ReadPump: Sending final stop typing from %d to %d on disconnect.", c.UserID, currentTypingTo)
 			c.sendStopTypingStatus(currentTypingTo)
+		}
+
+		c.recordingMu.Lock()
+		currentRecordingTo := c.recordingToUserID
+		c.recordingToUserID = 0
+		c.recordingMu.Unlock()
+		if currentRecordingTo != 0 {
+			log.Printf("Client ReadPump: Sending final stop recording from %d to %d on disconnect.", c.UserID, currentRecordingTo)
+			c.sendStopRecordingStatus(currentRecordingTo)
 		}
 
 		c.hub.unregister <- c
@@ -454,33 +482,26 @@ func (c *Client) readPump() {
 				c.sendWsError("Can only send typing status to matched users")
 				continue
 			}
-
 			c.typingMu.Lock()
 			currentTypingTo := c.typingToUserID
 			var oldRecipientID int32 = 0
-
-			if isTypingState { // Start typing
+			if isTypingState {
 				if currentTypingTo != 0 && currentTypingTo != recipientID {
 					oldRecipientID = currentTypingTo
-					// log.Printf("Client ReadPump: User %d switching typing from %d to %d.", senderUserID, oldRecipientID, recipientID) // Can be noisy
 				}
 				c.typingToUserID = recipientID
-			} else { // Stop typing
+			} else {
 				if currentTypingTo == recipientID {
-					c.typingToUserID = 0 // Clear state only if stopping for the correct user
+					c.typingToUserID = 0
 				} else {
-					// log.Printf("Client ReadPump: User %d sent stop typing for %d, but was marked as typing to %d. Ignoring.", senderUserID, recipientID, currentTypingTo) // Can be noisy
-					c.typingMu.Unlock() // Unlock before skipping
+					c.typingMu.Unlock()
 					continue
 				}
 			}
-			c.typingMu.Unlock() // Unlock mutex
-
-			// Send stop to old recipient if necessary (AFTER unlocking)
+			c.typingMu.Unlock()
 			if oldRecipientID != 0 {
 				c.sendStopTypingStatus(oldRecipientID)
 			}
-
 			typingStatusMsg := WsMessage{
 				Type:         "typing_status",
 				TypingUserID: &senderUserID,
@@ -491,8 +512,83 @@ func (c *Client) readPump() {
 				log.Printf("Client ReadPump ERROR: Failed to marshal typing status message for user %d -> %d: %v", senderUserID, recipientID, marshalErr)
 				continue
 			}
+			if !c.hub.SendToUser(recipientID, statusBytes) { /* offline */
+			}
+
+		case "recording_event":
+			senderUserID := c.UserID
+
+			if msg.RecipientUserID == nil || *msg.RecipientUserID <= 0 {
+				c.sendWsError("RecipientUserID is required for recording event")
+				continue
+			}
+			if msg.IsRecording == nil {
+				c.sendWsError("IsRecording boolean is required for recording event")
+				continue
+			}
+			recipientID := *msg.RecipientUserID
+			isRecordingState := *msg.IsRecording
+
+			if recipientID == senderUserID {
+				c.sendWsError("Cannot send recording indicator to yourself")
+				continue
+			}
+
+			mutualLikeParams := migrations.CheckMutualLikeExistsParams{
+				LikerUserID: senderUserID,
+				LikedUserID: recipientID,
+			}
+			mutualLike, errLikeCheck := queries.CheckMutualLikeExists(ctx, mutualLikeParams)
+			if errLikeCheck != nil {
+				log.Printf("Client ReadPump ERROR: Failed to check mutual like for recording indicator (%d -> %d): %v", senderUserID, recipientID, errLikeCheck)
+				c.sendWsError("Failed to check match status")
+				continue
+			}
+			if !mutualLike.Valid || !mutualLike.Bool {
+				c.sendWsError("Can only send recording status to matched users")
+				continue
+			}
+
+			c.recordingMu.Lock()
+			currentRecordingTo := c.recordingToUserID
+			var oldRecipientID int32 = 0
+
+			if isRecordingState {
+				if currentRecordingTo != 0 && currentRecordingTo != recipientID {
+					oldRecipientID = currentRecordingTo
+					log.Printf("Client ReadPump: User %d switching recording from %d to %d.", senderUserID, oldRecipientID, recipientID)
+				}
+				c.recordingToUserID = recipientID
+			} else {
+				if currentRecordingTo == recipientID {
+					c.recordingToUserID = 0
+				} else {
+					log.Printf("Client ReadPump: User %d sent stop recording for %d, but was marked as recording to %d. Ignoring.", senderUserID, recipientID, currentRecordingTo)
+					c.recordingMu.Unlock()
+					continue
+				}
+			}
+			c.recordingMu.Unlock()
+
+			if oldRecipientID != 0 {
+				c.sendStopRecordingStatus(oldRecipientID)
+			}
+
+			recordingStatusMsg := WsMessage{
+				Type:            "recording_status",
+				RecordingUserID: &senderUserID,
+				IsRecording:     &isRecordingState,
+			}
+			statusBytes, marshalErr := json.Marshal(recordingStatusMsg)
+			if marshalErr != nil {
+				log.Printf("Client ReadPump ERROR: Failed to marshal recording status message for user %d -> %d: %v", senderUserID, recipientID, marshalErr)
+				continue
+			}
+
 			if !c.hub.SendToUser(recipientID, statusBytes) {
-				// log.Printf("Client ReadPump DEBUG: Sent typing status (%t) for user %d to user %d.", isTypingState, senderUserID, recipientID) // Can be noisy
+				// log.Printf("Client ReadPump DEBUG: Recording status (%t) not sent (%d -> %d), recipient offline.", isRecordingState, senderUserID, recipientID) // Can be noisy
+			} else {
+				// log.Printf("Client ReadPump DEBUG: Sent recording status (%t) for user %d to user %d.", isRecordingState, senderUserID, recipientID) // Can be noisy
 			}
 
 		default:

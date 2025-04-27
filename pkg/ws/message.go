@@ -17,8 +17,7 @@ type WsMessage struct {
 	MediaType        *string `json:"media_type,omitempty"`
 	SentAt           *string `json:"sent_at,omitempty"` // ISO 8601 format string (outgoing)
 	ReplyToMessageID *int64  `json:"reply_to_message_id,omitempty"`
-
-	MessageID *int64 `json:"message_id,omitempty"`
+	MessageID        *int64  `json:"message_id,omitempty"`
 
 	Emoji *string `json:"emoji,omitempty"`
 
@@ -35,6 +34,9 @@ type WsMessage struct {
 	IsTyping     *bool  `json:"is_typing,omitempty"`
 	TypingUserID *int32 `json:"typing_user_id,omitempty"`
 
+	IsRecording     *bool  `json:"is_recording,omitempty"`
+	RecordingUserID *int32 `json:"recording_user_id,omitempty"`
+
 	Content *string `json:"content,omitempty"`
 	Count   *int64  `json:"count,omitempty"`
 }
@@ -44,7 +46,6 @@ func ChatMessageToWsMessage(dbMsg migrations.GetConversationMessagesRow) WsMessa
 	text := dbMsg.MessageText.String
 	mediaUrl := dbMsg.MediaUrl.String
 	mediaType := dbMsg.MediaType.String
-
 	wsMsg := WsMessage{
 		Type:            "chat_message",
 		ID:              &dbMsg.ID,
@@ -55,7 +56,6 @@ func ChatMessageToWsMessage(dbMsg migrations.GetConversationMessagesRow) WsMessa
 		MediaType:       nil,
 		SentAt:          &sentAtStr,
 	}
-
 	if dbMsg.MessageText.Valid {
 		wsMsg.Text = &text
 	}
@@ -68,7 +68,6 @@ func ChatMessageToWsMessage(dbMsg migrations.GetConversationMessagesRow) WsMessa
 	if dbMsg.ReplyToMessageID.Valid {
 		wsMsg.ReplyToMessageID = &dbMsg.ReplyToMessageID.Int64
 	}
-
 	return wsMsg
 }
 
