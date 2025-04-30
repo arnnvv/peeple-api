@@ -727,12 +727,6 @@ func (ns NullVerificationStatus) Value() (driver.Value, error) {
 	return string(ns.VerificationStatus), nil
 }
 
-type AppOpenLog struct {
-	ID       int64
-	UserID   int32
-	OpenedAt pgtype.Timestamptz
-}
-
 type ChatMessage struct {
 	ID               int64
 	SenderUserID     int32

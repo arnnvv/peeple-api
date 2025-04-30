@@ -528,6 +528,74 @@ func (q *Queries) GetActiveSubscription(ctx context.Context, arg GetActiveSubscr
 	return i, err
 }
 
+const getBasicMatchInfo = `-- name: GetBasicMatchInfo :one
+SELECT
+    id,
+    name,
+    last_name,
+    media_urls,
+    is_online,
+    last_online
+FROM users
+WHERE id = $1 LIMIT 1
+`
+
+type GetBasicMatchInfoRow struct {
+	ID         int32
+	Name       pgtype.Text
+	LastName   pgtype.Text
+	MediaUrls  []string
+	IsOnline   bool
+	LastOnline pgtype.Timestamptz
+}
+
+// Fetches minimal user info needed for a "new match" notification payload.
+func (q *Queries) GetBasicMatchInfo(ctx context.Context, id int32) (GetBasicMatchInfoRow, error) {
+	row := q.db.QueryRow(ctx, getBasicMatchInfo, id)
+	var i GetBasicMatchInfoRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.LastName,
+		&i.MediaUrls,
+		&i.IsOnline,
+		&i.LastOnline,
+	)
+	return i, err
+}
+
+const getBasicUserInfo = `-- name: GetBasicUserInfo :one
+
+SELECT
+    id,
+    name,
+    last_name,
+    media_urls
+FROM users
+WHERE id = $1 LIMIT 1
+`
+
+type GetBasicUserInfoRow struct {
+	ID        int32
+	Name      pgtype.Text
+	LastName  pgtype.Text
+	MediaUrls []string
+}
+
+// *** ADDED QUERIES FOR LIKE/MATCH NOTIFICATIONS ***
+// Fetches minimal user info needed for a "new like" notification payload.
+func (q *Queries) GetBasicUserInfo(ctx context.Context, id int32) (GetBasicUserInfoRow, error) {
+	row := q.db.QueryRow(ctx, getBasicUserInfo, id)
+	var i GetBasicUserInfoRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.LastName,
+		&i.MediaUrls,
+	)
+	return i, err
+}
+
 const getConversationMessages = `-- name: GetConversationMessages :many
 WITH MessageReactionsAgg AS (
     SELECT
@@ -933,9 +1001,9 @@ LEFT JOIN LATERAL (
         WHERE
             (cm.sender_user_id = l1.liker_user_id AND cm.recipient_user_id = l1.liked_user_id)
             OR (cm.sender_user_id = l1.liked_user_id AND cm.recipient_user_id = l1.liker_user_id)
-        
+
         UNION ALL
-        
+
         SELECT
             mr.updated_at AS event_at,
             mr.user_id AS event_user_id,

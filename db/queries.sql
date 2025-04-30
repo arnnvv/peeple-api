@@ -539,9 +539,9 @@ LEFT JOIN LATERAL (
         WHERE
             (cm.sender_user_id = l1.liker_user_id AND cm.recipient_user_id = l1.liked_user_id)
             OR (cm.sender_user_id = l1.liked_user_id AND cm.recipient_user_id = l1.liker_user_id)
-        
+
         UNION ALL
-        
+
         SELECT
             mr.updated_at AS event_at,
             mr.user_id AS event_user_id,
@@ -583,3 +583,27 @@ WHERE
 UPDATE users
 SET last_online = NOW()
 WHERE id = $1;
+
+-- *** ADDED QUERIES FOR LIKE/MATCH NOTIFICATIONS ***
+
+-- name: GetBasicUserInfo :one
+-- Fetches minimal user info needed for a "new like" notification payload.
+SELECT
+    id,
+    name,
+    last_name,
+    media_urls
+FROM users
+WHERE id = $1 LIMIT 1;
+
+-- name: GetBasicMatchInfo :one
+-- Fetches minimal user info needed for a "new match" notification payload.
+SELECT
+    id,
+    name,
+    last_name,
+    media_urls,
+    is_online,
+    last_online
+FROM users
+WHERE id = $1 LIMIT 1;
