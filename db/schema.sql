@@ -313,53 +313,39 @@ BEFORE UPDATE ON message_reactions
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
 
--- ========================================
---      ANALYTICS TABLES ADDITION
--- ========================================
-
--- Table to log when a user's profile is shown in a feed
 CREATE TABLE user_profile_impressions (
     impression_id BIGSERIAL PRIMARY KEY,
     viewer_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     shown_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     impression_timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    source VARCHAR(20) NOT NULL, -- e.g., 'homefeed', 'spotlight', 'likes_you_screen'
+    source VARCHAR(20) NOT NULL,
     CONSTRAINT chk_viewer_shown_different CHECK (viewer_user_id <> shown_user_id)
 );
 CREATE INDEX idx_impressions_shown_user_source_time ON user_profile_impressions (shown_user_id, source, impression_timestamp DESC);
 CREATE INDEX idx_impressions_viewer_shown ON user_profile_impressions (viewer_user_id, shown_user_id);
-CREATE INDEX idx_impressions_timestamp ON user_profile_impressions (impression_timestamp DESC); -- Added for date range filtering
+CREATE INDEX idx_impressions_timestamp ON user_profile_impressions (impression_timestamp DESC);
 
--- Table to log when a user views a profile *specifically from the 'Likes You'* screen
 CREATE TABLE like_profile_views (
     view_id BIGSERIAL PRIMARY KEY,
-    viewer_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, -- User who received the like and is viewing
-    liker_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,  -- User who sent the like (whose profile is viewed)
-    like_id INTEGER NOT NULL REFERENCES likes(id) ON DELETE CASCADE,         -- The specific like that led to the view
+    viewer_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    liker_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    like_id INTEGER NOT NULL REFERENCES likes(id) ON DELETE CASCADE,
     view_timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX idx_like_profile_views_like_id ON like_profile_views (like_id);
 CREATE INDEX idx_like_profile_views_viewer_liker ON like_profile_views (viewer_user_id, liker_user_id);
-CREATE INDEX idx_like_profile_views_liker_time ON like_profile_views (liker_user_id, view_timestamp DESC); -- Useful for the analytic count by date range
+CREATE INDEX idx_like_profile_views_liker_time ON like_profile_views (liker_user_id, view_timestamp DESC);
 
--- ========================================
---      PHOTO VIEW DURATION TABLE
--- ========================================
-
--- Table to log view durations for specific photos within a profile
 CREATE TABLE photo_view_durations (
     view_id BIGSERIAL PRIMARY KEY,
     viewer_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     viewed_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    photo_index SMALLINT NOT NULL, -- 0-based index in the media_urls array
-    duration_ms INTEGER NOT NULL, -- Duration in milliseconds
+    photo_index SMALLINT NOT NULL,
+    duration_ms INTEGER NOT NULL,
     view_timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT chk_photo_index_range CHECK (photo_index >= 0 AND photo_index <= 5),
     CONSTRAINT chk_duration_positive CHECK (duration_ms > 0),
-    CONSTRAINT chk_viewer_viewed_different_photo CHECK (viewer_user_id <> viewed_user_id) -- Ensure user isn't viewing their own photos
+    CONSTRAINT chk_viewer_viewed_different_photo CHECK (viewer_user_id <> viewed_user_id)
 );
 
--- Index optimized for calculating average duration per photo for a specific user
 CREATE INDEX idx_photo_view_durations_viewed_photo_time ON photo_view_durations (viewed_user_id, photo_index, view_timestamp DESC);
--- Optional index if querying by viewer is common
--- CREATE INDEX idx_photo_view_durations_viewer ON photo_view_durations (viewer_user_id);

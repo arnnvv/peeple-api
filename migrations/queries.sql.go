@@ -189,7 +189,6 @@ type CountDislikesReceivedParams struct {
 	EndDate        pgtype.Timestamptz
 }
 
-// Counts dislikes received by the user within a date range.
 func (q *Queries) CountDislikesReceived(ctx context.Context, arg CountDislikesReceivedParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countDislikesReceived, arg.DislikedUserID, arg.StartDate, arg.EndDate)
 	var count int64
@@ -198,8 +197,6 @@ func (q *Queries) CountDislikesReceived(ctx context.Context, arg CountDislikesRe
 }
 
 const countDislikesSent = `-- name: CountDislikesSent :one
-
-
 SELECT COUNT(*)
 FROM dislikes
 WHERE disliker_user_id = $1 -- Use named param
@@ -213,7 +210,6 @@ type CountDislikesSentParams struct {
 	EndDate        pgtype.Timestamptz
 }
 
-// Only consider intervals where a previous interaction exists
 // Counts dislikes sent by the user within a date range.
 func (q *Queries) CountDislikesSent(ctx context.Context, arg CountDislikesSentParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countDislikesSent, arg.DislikerUserID, arg.StartDate, arg.EndDate)
@@ -225,7 +221,7 @@ func (q *Queries) CountDislikesSent(ctx context.Context, arg CountDislikesSentPa
 const countImpressionsDuringSpotlight = `-- name: CountImpressionsDuringSpotlight :one
 SELECT COUNT(*)
 FROM user_profile_impressions
-WHERE shown_user_id = $1 -- Use named param
+WHERE shown_user_id = $1
   AND source = 'spotlight'
   AND ($2::timestamptz IS NULL OR impression_timestamp >= $2)
   AND ($3::timestamptz IS NULL OR impression_timestamp <= $3)
@@ -237,7 +233,6 @@ type CountImpressionsDuringSpotlightParams struct {
 	EndDate     pgtype.Timestamptz
 }
 
-// Counts profile impressions specifically from spotlight source within a date range.
 func (q *Queries) CountImpressionsDuringSpotlight(ctx context.Context, arg CountImpressionsDuringSpotlightParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countImpressionsDuringSpotlight, arg.ShownUserID, arg.StartDate, arg.EndDate)
 	var count int64
@@ -248,8 +243,8 @@ func (q *Queries) CountImpressionsDuringSpotlight(ctx context.Context, arg Count
 const countProfileImpressions = `-- name: CountProfileImpressions :one
 SELECT COUNT(*)
 FROM user_profile_impressions
-WHERE shown_user_id = $1 -- Use named param
-  AND ($2::timestamptz IS NULL OR impression_timestamp >= $2) -- Start date (inclusive)
+WHERE shown_user_id = $1
+  AND ($2::timestamptz IS NULL OR impression_timestamp >= $2)
   AND ($3::timestamptz IS NULL OR impression_timestamp <= $3)
 `
 
@@ -259,7 +254,6 @@ type CountProfileImpressionsParams struct {
 	EndDate     pgtype.Timestamptz
 }
 
-// Counts how many times a user's profile was shown within a date range.
 func (q *Queries) CountProfileImpressions(ctx context.Context, arg CountProfileImpressionsParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countProfileImpressions, arg.ShownUserID, arg.StartDate, arg.EndDate)
 	var count int64
@@ -281,7 +275,6 @@ type CountProfilesOpenedFromLikeParams struct {
 	EndDate     pgtype.Timestamptz
 }
 
-// Counts how many times profiles liked by the user were opened from the 'Likes You' screen.
 func (q *Queries) CountProfilesOpenedFromLike(ctx context.Context, arg CountProfilesOpenedFromLikeParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countProfilesOpenedFromLike, arg.LikerUserID, arg.StartDate, arg.EndDate)
 	var count int64
@@ -643,16 +636,13 @@ func (q *Queries) GetActiveSubscription(ctx context.Context, arg GetActiveSubscr
 }
 
 const getApproximateProfileViewTimeSeconds = `-- name: GetApproximateProfileViewTimeSeconds :one
-
-
 WITH UserInteractions AS (
-    -- Combine likes and dislikes where the target user was interacted with
     SELECT
         l.liker_user_id AS viewer_user_id,
         l.liked_user_id AS interacted_user_id,
         l.created_at
     FROM likes l
-    WHERE l.liked_user_id = $1 -- Use named param for the user whose profile view time we want
+    WHERE l.liked_user_id = $1
       AND ($2::timestamptz IS NULL OR l.created_at >= $2)
       AND ($3::timestamptz IS NULL OR l.created_at <= $3)
     UNION ALL
@@ -661,7 +651,7 @@ WITH UserInteractions AS (
         d.disliked_user_id AS interacted_user_id,
         d.created_at
     FROM dislikes d
-    WHERE d.disliked_user_id = $1 -- Use named param here too
+    WHERE d.disliked_user_id = $1
       AND ($2::timestamptz IS NULL OR d.created_at >= $2)
       AND ($3::timestamptz IS NULL OR d.created_at <= $3)
 ),
@@ -673,11 +663,11 @@ InteractionIntervals AS (
 )
 SELECT
     COALESCE(AVG(
-        LEAST( -- Apply 60-second cap
-            EXTRACT(EPOCH FROM (created_at - prev_created_at)), -- Duration in seconds
+        LEAST(
+            EXTRACT(EPOCH FROM (created_at - prev_created_at)),
             60.0
         )
-    ), 0.0)::float -- Return 0.0 if no intervals found
+    ), 0.0)::float
 FROM InteractionIntervals
 WHERE prev_created_at IS NOT NULL
 `
@@ -688,9 +678,6 @@ type GetApproximateProfileViewTimeSecondsParams struct {
 	EndDate      pgtype.Timestamptz
 }
 
-// End date (inclusive)
-// Calculates the approximate average profile view time in seconds, based on interaction intervals.
-// Note: This is an approximation and excludes views without interactions.
 func (q *Queries) GetApproximateProfileViewTimeSeconds(ctx context.Context, arg GetApproximateProfileViewTimeSecondsParams) (float64, error) {
 	row := q.db.QueryRow(ctx, getApproximateProfileViewTimeSeconds, arg.TargetUserID, arg.StartDate, arg.EndDate)
 	var column_1 float64
@@ -719,7 +706,6 @@ type GetBasicMatchInfoRow struct {
 	LastOnline pgtype.Timestamptz
 }
 
-// Fetches minimal user info needed for a "new match" notification payload.
 func (q *Queries) GetBasicMatchInfo(ctx context.Context, id int32) (GetBasicMatchInfoRow, error) {
 	row := q.db.QueryRow(ctx, getBasicMatchInfo, id)
 	var i GetBasicMatchInfoRow
@@ -735,7 +721,6 @@ func (q *Queries) GetBasicMatchInfo(ctx context.Context, id int32) (GetBasicMatc
 }
 
 const getBasicUserInfo = `-- name: GetBasicUserInfo :one
-
 SELECT
     id,
     name,
@@ -752,8 +737,6 @@ type GetBasicUserInfoRow struct {
 	MediaUrls []string
 }
 
-// *** ADDED QUERIES FOR LIKE/MATCH NOTIFICATIONS ***
-// Fetches minimal user info needed for a "new like" notification payload.
 func (q *Queries) GetBasicUserInfo(ctx context.Context, id int32) (GetBasicUserInfoRow, error) {
 	row := q.db.QueryRow(ctx, getBasicUserInfo, id)
 	var i GetBasicUserInfoRow
@@ -1322,10 +1305,10 @@ func (q *Queries) GetPendingVerificationUsers(ctx context.Context, verificationS
 const getPhotoAverageViewDurations = `-- name: GetPhotoAverageViewDurations :many
 SELECT
     photo_index,
-    COALESCE(AVG(duration_ms), 0)::float AS average_duration_ms -- Return 0 if no views for that index
+    COALESCE(AVG(duration_ms), 0)::float AS average_duration_ms
 FROM photo_view_durations
 WHERE
-    viewed_user_id = $1 -- Use named param for the user whose photos were viewed
+    viewed_user_id = $1
     AND ($2::timestamptz IS NULL OR view_timestamp >= $2)
     AND ($3::timestamptz IS NULL OR view_timestamp <= $3)
 GROUP BY photo_index
@@ -1343,8 +1326,6 @@ type GetPhotoAverageViewDurationsRow struct {
 	AverageDurationMs float64
 }
 
-// Calculates the average view duration in milliseconds for each photo index
-// of a specific user, optionally filtered by a date range.
 func (q *Queries) GetPhotoAverageViewDurations(ctx context.Context, arg GetPhotoAverageViewDurationsParams) ([]GetPhotoAverageViewDurationsRow, error) {
 	rows, err := q.db.Query(ctx, getPhotoAverageViewDurations, arg.ViewedUserID, arg.StartDate, arg.EndDate)
 	if err != nil {
@@ -1828,7 +1809,7 @@ SELECT
     u.spotlight_active_until as expires_at
 FROM user_consumables uc
 JOIN users u ON uc.user_id = u.id
-WHERE uc.user_id = $1 -- Use named param
+WHERE uc.user_id = $1
   AND uc.consumable_type = 'spotlight'
   AND u.spotlight_active_until IS NOT NULL
   AND (
@@ -1850,7 +1831,6 @@ type GetUserSpotlightActivationTimesRow struct {
 	ExpiresAt              pgtype.Timestamptz
 }
 
-// Fetches the activation time (approximated by updated_at) and expiry time for spotlight consumables.
 func (q *Queries) GetUserSpotlightActivationTimes(ctx context.Context, arg GetUserSpotlightActivationTimesParams) ([]GetUserSpotlightActivationTimesRow, error) {
 	rows, err := q.db.Query(ctx, getUserSpotlightActivationTimes, arg.UserID, arg.StartDate, arg.EndDate)
 	if err != nil {
@@ -1914,14 +1894,12 @@ type LogLikeProfileViewParams struct {
 	LikeID       int32
 }
 
-// Logs when a user views a liker's profile from the 'Likes You' screen.
 func (q *Queries) LogLikeProfileView(ctx context.Context, arg LogLikeProfileViewParams) error {
 	_, err := q.db.Exec(ctx, logLikeProfileView, arg.ViewerUserID, arg.LikerUserID, arg.LikeID)
 	return err
 }
 
 const logPhotoViewDuration = `-- name: LogPhotoViewDuration :exec
-
 INSERT INTO photo_view_durations (
     viewer_user_id, viewed_user_id, photo_index, duration_ms
 ) VALUES (
@@ -1936,12 +1914,6 @@ type LogPhotoViewDurationParams struct {
 	DurationMs   int32
 }
 
-// ========================================
-//
-//	PHOTO VIEW DURATION QUERIES
-//
-// ========================================
-// Logs a single instance of a photo being viewed for a specific duration.
 func (q *Queries) LogPhotoViewDuration(ctx context.Context, arg LogPhotoViewDurationParams) error {
 	_, err := q.db.Exec(ctx, logPhotoViewDuration,
 		arg.ViewerUserID,
@@ -1953,11 +1925,10 @@ func (q *Queries) LogPhotoViewDuration(ctx context.Context, arg LogPhotoViewDura
 }
 
 const logUserProfileImpression = `-- name: LogUserProfileImpression :exec
-
 INSERT INTO user_profile_impressions (
     viewer_user_id, shown_user_id, source
 ) VALUES (
-    $1, $2, $3 -- Positional is fine for simple inserts if preferred, but named below for clarity
+    $1, $2, $3
 )
 `
 
@@ -1967,12 +1938,6 @@ type LogUserProfileImpressionParams struct {
 	Source       string
 }
 
-// ========================================
-//
-//	ANALYTICS QUERIES (CORRECTED)
-//
-// ========================================
-// Logs when a user's profile is shown to another user.
 func (q *Queries) LogUserProfileImpression(ctx context.Context, arg LogUserProfileImpressionParams) error {
 	_, err := q.db.Exec(ctx, logUserProfileImpression, arg.ViewerUserID, arg.ShownUserID, arg.Source)
 	return err

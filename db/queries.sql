@@ -584,10 +584,7 @@ UPDATE users
 SET last_online = NOW()
 WHERE id = $1;
 
--- *** ADDED QUERIES FOR LIKE/MATCH NOTIFICATIONS ***
-
 -- name: GetBasicUserInfo :one
--- Fetches minimal user info needed for a "new like" notification payload.
 SELECT
     id,
     name,
@@ -597,7 +594,6 @@ FROM users
 WHERE id = $1 LIMIT 1;
 
 -- name: GetBasicMatchInfo :one
--- Fetches minimal user info needed for a "new match" notification payload.
 SELECT
     id,
     name,
@@ -608,20 +604,14 @@ SELECT
 FROM users
 WHERE id = $1 LIMIT 1;
 
--- ========================================
---      ANALYTICS QUERIES (CORRECTED)
--- ========================================
-
 -- name: LogUserProfileImpression :exec
--- Logs when a user's profile is shown to another user.
 INSERT INTO user_profile_impressions (
     viewer_user_id, shown_user_id, source
 ) VALUES (
-    $1, $2, $3 -- Positional is fine for simple inserts if preferred, but named below for clarity
+    $1, $2, $3
 );
 
 -- name: LogLikeProfileView :exec
--- Logs when a user views a liker's profile from the 'Likes You' screen.
 INSERT INTO like_profile_views (
     viewer_user_id, liker_user_id, like_id
 ) VALUES (
@@ -629,25 +619,21 @@ INSERT INTO like_profile_views (
 );
 
 -- name: CountProfileImpressions :one
--- Counts how many times a user's profile was shown within a date range.
 SELECT COUNT(*)
 FROM user_profile_impressions
-WHERE shown_user_id = @shown_user_id -- Use named param
-  AND (@start_date::timestamptz IS NULL OR impression_timestamp >= @start_date) -- Start date (inclusive)
-  AND (@end_date::timestamptz IS NULL OR impression_timestamp <= @end_date); -- End date (inclusive)
+WHERE shown_user_id = @shown_user_id
+  AND (@start_date::timestamptz IS NULL OR impression_timestamp >= @start_date)
+  AND (@end_date::timestamptz IS NULL OR impression_timestamp <= @end_date);
 
 
 -- name: GetApproximateProfileViewTimeSeconds :one
--- Calculates the approximate average profile view time in seconds, based on interaction intervals.
--- Note: This is an approximation and excludes views without interactions.
 WITH UserInteractions AS (
-    -- Combine likes and dislikes where the target user was interacted with
     SELECT
         l.liker_user_id AS viewer_user_id,
         l.liked_user_id AS interacted_user_id,
         l.created_at
     FROM likes l
-    WHERE l.liked_user_id = @target_user_id -- Use named param for the user whose profile view time we want
+    WHERE l.liked_user_id = @target_user_id
       AND (@start_date::timestamptz IS NULL OR l.created_at >= @start_date)
       AND (@end_date::timestamptz IS NULL OR l.created_at <= @end_date)
     UNION ALL
@@ -656,7 +642,7 @@ WITH UserInteractions AS (
         d.disliked_user_id AS interacted_user_id,
         d.created_at
     FROM dislikes d
-    WHERE d.disliked_user_id = @target_user_id -- Use named param here too
+    WHERE d.disliked_user_id = @target_user_id
       AND (@start_date::timestamptz IS NULL OR d.created_at >= @start_date)
       AND (@end_date::timestamptz IS NULL OR d.created_at <= @end_date)
 ),
@@ -668,13 +654,13 @@ InteractionIntervals AS (
 )
 SELECT
     COALESCE(AVG(
-        LEAST( -- Apply 60-second cap
-            EXTRACT(EPOCH FROM (created_at - prev_created_at)), -- Duration in seconds
+        LEAST(
+            EXTRACT(EPOCH FROM (created_at - prev_created_at)),
             60.0
         )
-    ), 0.0)::float -- Return 0.0 if no intervals found
+    ), 0.0)::float
 FROM InteractionIntervals
-WHERE prev_created_at IS NOT NULL; -- Only consider intervals where a previous interaction exists
+WHERE prev_created_at IS NOT NULL;
 
 
 -- name: CountDislikesSent :one
@@ -686,7 +672,6 @@ WHERE disliker_user_id = @disliker_user_id -- Use named param
   AND (@end_date::timestamptz IS NULL OR created_at <= @end_date);
 
 -- name: CountDislikesReceived :one
--- Counts dislikes received by the user within a date range.
 SELECT COUNT(*)
 FROM dislikes
 WHERE disliked_user_id = @disliked_user_id -- Use named param
@@ -694,7 +679,6 @@ WHERE disliked_user_id = @disliked_user_id -- Use named param
   AND (@end_date::timestamptz IS NULL OR created_at <= @end_date);
 
 -- name: CountProfilesOpenedFromLike :one
--- Counts how many times profiles liked by the user were opened from the 'Likes You' screen.
 SELECT COUNT(*)
 FROM like_profile_views
 WHERE liker_user_id = @liker_user_id -- Use named param
@@ -703,22 +687,20 @@ WHERE liker_user_id = @liker_user_id -- Use named param
 
 
 -- name: CountImpressionsDuringSpotlight :one
--- Counts profile impressions specifically from spotlight source within a date range.
 SELECT COUNT(*)
 FROM user_profile_impressions
-WHERE shown_user_id = @shown_user_id -- Use named param
+WHERE shown_user_id = @shown_user_id
   AND source = 'spotlight'
   AND (@start_date::timestamptz IS NULL OR impression_timestamp >= @start_date)
   AND (@end_date::timestamptz IS NULL OR impression_timestamp <= @end_date);
 
 -- name: GetUserSpotlightActivationTimes :many
--- Fetches the activation time (approximated by updated_at) and expiry time for spotlight consumables.
 SELECT
     updated_at as potentially_activated_at,
     u.spotlight_active_until as expires_at
 FROM user_consumables uc
 JOIN users u ON uc.user_id = u.id
-WHERE uc.user_id = @user_id -- Use named param
+WHERE uc.user_id = @user_id
   AND uc.consumable_type = 'spotlight'
   AND u.spotlight_active_until IS NOT NULL
   AND (
@@ -728,13 +710,7 @@ WHERE uc.user_id = @user_id -- Use named param
       )
 ORDER BY u.spotlight_active_until DESC;
 
-
--- ========================================
---      PHOTO VIEW DURATION QUERIES
--- ========================================
-
 -- name: LogPhotoViewDuration :exec
--- Logs a single instance of a photo being viewed for a specific duration.
 INSERT INTO photo_view_durations (
     viewer_user_id, viewed_user_id, photo_index, duration_ms
 ) VALUES (
@@ -742,14 +718,12 @@ INSERT INTO photo_view_durations (
 );
 
 -- name: GetPhotoAverageViewDurations :many
--- Calculates the average view duration in milliseconds for each photo index
--- of a specific user, optionally filtered by a date range.
 SELECT
     photo_index,
-    COALESCE(AVG(duration_ms), 0)::float AS average_duration_ms -- Return 0 if no views for that index
+    COALESCE(AVG(duration_ms), 0)::float AS average_duration_ms
 FROM photo_view_durations
 WHERE
-    viewed_user_id = @viewed_user_id -- Use named param for the user whose photos were viewed
+    viewed_user_id = @viewed_user_id
     AND (@start_date::timestamptz IS NULL OR view_timestamp >= @start_date)
     AND (@end_date::timestamptz IS NULL OR view_timestamp <= @end_date)
 GROUP BY photo_index

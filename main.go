@@ -161,7 +161,6 @@ func setupRoutes(hub *ws.Hub) *http.ServeMux {
 	mux.HandleFunc("/api/analytics/spotlight", authMiddleware(handlers.GetSpotlightAnalyticsHandler))
 	mux.HandleFunc("/api/analytics/log-like-profile-view", authMiddleware(handlers.LogLikeProfileViewHandler))
 	mux.HandleFunc("/api/analytics/log-photo-views", authMiddleware(handlers.LogPhotoViewsHandler))
-	// --- END NEW ANALYTICS ROUTES ---
 
 	return mux
 }
