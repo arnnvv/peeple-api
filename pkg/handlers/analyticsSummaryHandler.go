@@ -1,6 +1,8 @@
+// FILE: pkg/handlers/analyticsSummaryHandler.go
 package handlers
 
 import (
+	"context" // Import context
 	"log"
 	"net/http"
 	"time"
@@ -12,20 +14,25 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type AnalyticsSummaryResponse struct {
-	Success   bool                    `json:"success"`
-	Analytics *AnalyticsSummaryFields `json:"analytics,omitempty"`
-	Message   string                  `json:"message,omitempty"`
-}
-
+// ---- MODIFIED: AnalyticsSummaryFields ----
 type AnalyticsSummaryFields struct {
 	ProfileVisibilityCount        int64   `json:"profile_visibility_count"`
 	AverageProfileViewTimeSeconds float64 `json:"average_profile_view_time_seconds"`
 	DislikesSentCount             int64   `json:"dislikes_sent_count"`
 	DislikesReceivedCount         int64   `json:"dislikes_received_count"`
 	ProfilesOpenedFromLike        int64   `json:"profiles_opened_from_like"`
+	// --- ADDED ---
+	PhotoAvgViewTimeMs map[int]float64 `json:"photo_avg_view_time_ms"` // Map[photo_index]average_duration_ms
 }
 
+// ---- UNCHANGED: AnalyticsSummaryResponse ----
+type AnalyticsSummaryResponse struct {
+	Success   bool                    `json:"success"`
+	Analytics *AnalyticsSummaryFields `json:"analytics,omitempty"`
+	Message   string                  `json:"message,omitempty"`
+}
+
+// ---- UNCHANGED: parseDateToTimestamptz ----
 // Helper function to parse date string and return Timestamptz for query
 // Returns Valid=false if dateStr is empty or invalid format.
 // Adjusts end date to be end of the day.
@@ -46,6 +53,7 @@ func parseDateToTimestamptz(dateStr string, isEndDate bool) pgtype.Timestamptz {
 	return pgtype.Timestamptz{Time: t, Valid: true}
 }
 
+// ---- MODIFIED: GetAnalyticsSummaryHandler ----
 func GetAnalyticsSummaryHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	ctx := r.Context()
@@ -78,75 +86,110 @@ func GetAnalyticsSummaryHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("GetAnalyticsSummary: UserID=%d, StartDate='%s' (Valid: %t), EndDate='%s' (Valid: %t)",
 		userID, startDateStr, startDate.Valid, endDateStr, endDate.Valid)
 
-	// Fetch individual metrics
+	// --- MODIFIED: Declare variables to hold results from ALL goroutines ---
 	var visibilityCount, dislikesSent, dislikesReceived, profilesOpened int64
 	var avgViewTime float64
-	var errVis, errDisSent, errDisRec, errProfOpen, errAvgView error
+	var avgPhotoDurations []migrations.GetPhotoAverageViewDurationsRow // Holds result of new query
+	var firstError error                                               // Variable to capture the first error
 
-	// Run queries concurrently for potential performance improvement
-	errChan := make(chan error, 5) // Channel to collect errors from goroutines
+	// Use WaitGroupWithError for concurrent fetching
+	wg := utils.NewWaitGroupWithError(ctx) // Create a group tied to the request context
 
-	go func() {
-		visibilityCount, errVis = queries.CountProfileImpressions(ctx, migrations.CountProfileImpressionsParams{
+	// --- MODIFIED: Add goroutines for ALL metrics (now 6) ---
+
+	// 1. Profile Visibility Count
+	wg.Add(func(innerCtx context.Context) error {
+		var err error
+		visibilityCount, err = queries.CountProfileImpressions(innerCtx, migrations.CountProfileImpressionsParams{
 			ShownUserID: userID,
 			StartDate:   startDate,
 			EndDate:     endDate,
 		})
-		errChan <- errVis
-	}()
+		return err
+	})
 
-	// Inside GetAnalyticsSummaryHandler, in the goroutine for avgViewTime:
-	go func() {
-		avgViewTime, errAvgView = queries.GetApproximateProfileViewTimeSeconds(ctx, migrations.GetApproximateProfileViewTimeSecondsParams{
-			TargetUserID: userID, // <-- CORRECTED Field Name
+	// 2. Average Profile View Time
+	wg.Add(func(innerCtx context.Context) error {
+		var err error
+		avgViewTime, err = queries.GetApproximateProfileViewTimeSeconds(innerCtx, migrations.GetApproximateProfileViewTimeSecondsParams{
+			TargetUserID: userID,
 			StartDate:    startDate,
 			EndDate:      endDate,
 		})
-		errChan <- errAvgView
-	}()
+		return err
+	})
 
-	go func() {
-		dislikesSent, errDisSent = queries.CountDislikesSent(ctx, migrations.CountDislikesSentParams{
+	// 3. Dislikes Sent
+	wg.Add(func(innerCtx context.Context) error {
+		var err error
+		dislikesSent, err = queries.CountDislikesSent(innerCtx, migrations.CountDislikesSentParams{
 			DislikerUserID: userID,
 			StartDate:      startDate,
 			EndDate:        endDate,
 		})
-		errChan <- errDisSent
-	}()
+		return err
+	})
 
-	go func() {
-		dislikesReceived, errDisRec = queries.CountDislikesReceived(ctx, migrations.CountDislikesReceivedParams{
+	// 4. Dislikes Received
+	wg.Add(func(innerCtx context.Context) error {
+		var err error
+		dislikesReceived, err = queries.CountDislikesReceived(innerCtx, migrations.CountDislikesReceivedParams{
 			DislikedUserID: userID,
 			StartDate:      startDate,
 			EndDate:        endDate,
 		})
-		errChan <- errDisRec
-	}()
+		return err
+	})
 
-	go func() {
-		profilesOpened, errProfOpen = queries.CountProfilesOpenedFromLike(ctx, migrations.CountProfilesOpenedFromLikeParams{
+	// 5. Profiles Opened From Like Screen
+	wg.Add(func(innerCtx context.Context) error {
+		var err error
+		profilesOpened, err = queries.CountProfilesOpenedFromLike(innerCtx, migrations.CountProfilesOpenedFromLikeParams{
 			LikerUserID: userID,
 			StartDate:   startDate,
 			EndDate:     endDate,
 		})
-		errChan <- errProfOpen
-	}()
+		return err
+	})
 
-	// Wait for all goroutines to finish and check errors
-	var firstError error
-	for i := 0; i < 5; i++ {
-		err := <-errChan
-		if err != nil && firstError == nil {
-			firstError = err // Capture the first error encountered
+	// 6. --- NEW: Average Photo View Durations ---
+	wg.Add(func(innerCtx context.Context) error {
+		var err error
+		log.Printf("GetAnalyticsSummary [Goroutine]: Fetching avg photo durations for user %d", userID)
+		avgPhotoDurations, err = queries.GetPhotoAverageViewDurations(innerCtx, migrations.GetPhotoAverageViewDurationsParams{
+			ViewedUserID: userID, // User requesting stats about *their* photos being viewed
+			StartDate:    startDate,
+			EndDate:      endDate,
+		})
+		if err != nil {
+			log.Printf("GetAnalyticsSummary [Goroutine]: Error fetching avg photo durations for user %d: %v", userID, err)
+		} else {
+			log.Printf("GetAnalyticsSummary [Goroutine]: Fetched %d photo duration averages for user %d", len(avgPhotoDurations), userID)
 		}
-	}
-	close(errChan)
+		return err // Return error to the WaitGroup
+	})
+
+	// --- MODIFIED: Wait for all goroutines and check for the first error ---
+	firstError = wg.Wait(ctx) // Wait blocks until all Go routines return or one returns an error
 
 	if firstError != nil {
-		log.Printf("Error fetching analytics summary for user %d: %v", userID, firstError)
-		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to retrieve analytics data")
+		// Log the actual first error encountered by any goroutine
+		log.Printf("Error fetching analytics summary component for user %d: %v", userID, firstError)
+		utils.RespondWithError(w, http.StatusInternalServerError, "Failed to retrieve one or more analytics data components")
 		return
 	}
+
+	// --- NEW: Process photo durations after waiting and error check ---
+	photoAvgViewTimeMs := make(map[int]float64)
+	// Check avgPhotoDurations is not nil which could happen if the goroutine panicked
+	// although errgroup handles this. It's safe defensive coding.
+	if avgPhotoDurations != nil {
+		for _, rowData := range avgPhotoDurations {
+			// Use int for map key as JSON keys are strings anyway, but Go maps work better with simple types
+			photoAvgViewTimeMs[int(rowData.PhotoIndex)] = rowData.AverageDurationMs
+		}
+	}
+	log.Printf("GetAnalyticsSummary: Processed photo durations into map for user %d: %v", userID, photoAvgViewTimeMs)
 
 	// Construct the response
 	summary := AnalyticsSummaryFields{
@@ -155,6 +198,8 @@ func GetAnalyticsSummaryHandler(w http.ResponseWriter, r *http.Request) {
 		DislikesSentCount:             dislikesSent,
 		DislikesReceivedCount:         dislikesReceived,
 		ProfilesOpenedFromLike:        profilesOpened,
+		// --- ADDED ---
+		PhotoAvgViewTimeMs: photoAvgViewTimeMs, // Assign the processed map
 	}
 
 	utils.RespondWithJSON(w, http.StatusOK, AnalyticsSummaryResponse{

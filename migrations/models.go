@@ -806,6 +806,15 @@ type MyTypePrompt struct {
 	Answer   string
 }
 
+type PhotoViewDuration struct {
+	ViewID        int64
+	ViewerUserID  int32
+	ViewedUserID  int32
+	PhotoIndex    int16
+	DurationMs    int32
+	ViewTimestamp pgtype.Timestamptz
+}
+
 type Report struct {
 	ID             int64
 	ReporterUserID int32

@@ -727,3 +727,30 @@ WHERE uc.user_id = @user_id -- Use named param
        (@end_date::timestamptz IS NULL OR uc.updated_at <= @end_date)
       )
 ORDER BY u.spotlight_active_until DESC;
+
+
+-- ========================================
+--      PHOTO VIEW DURATION QUERIES
+-- ========================================
+
+-- name: LogPhotoViewDuration :exec
+-- Logs a single instance of a photo being viewed for a specific duration.
+INSERT INTO photo_view_durations (
+    viewer_user_id, viewed_user_id, photo_index, duration_ms
+) VALUES (
+    $1, $2, $3, $4
+);
+
+-- name: GetPhotoAverageViewDurations :many
+-- Calculates the average view duration in milliseconds for each photo index
+-- of a specific user, optionally filtered by a date range.
+SELECT
+    photo_index,
+    COALESCE(AVG(duration_ms), 0)::float AS average_duration_ms -- Return 0 if no views for that index
+FROM photo_view_durations
+WHERE
+    viewed_user_id = @viewed_user_id -- Use named param for the user whose photos were viewed
+    AND (@start_date::timestamptz IS NULL OR view_timestamp >= @start_date)
+    AND (@end_date::timestamptz IS NULL OR view_timestamp <= @end_date)
+GROUP BY photo_index
+ORDER BY photo_index;

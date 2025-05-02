@@ -341,3 +341,25 @@ CREATE TABLE like_profile_views (
 CREATE INDEX idx_like_profile_views_like_id ON like_profile_views (like_id);
 CREATE INDEX idx_like_profile_views_viewer_liker ON like_profile_views (viewer_user_id, liker_user_id);
 CREATE INDEX idx_like_profile_views_liker_time ON like_profile_views (liker_user_id, view_timestamp DESC); -- Useful for the analytic count by date range
+
+-- ========================================
+--      PHOTO VIEW DURATION TABLE
+-- ========================================
+
+-- Table to log view durations for specific photos within a profile
+CREATE TABLE photo_view_durations (
+    view_id BIGSERIAL PRIMARY KEY,
+    viewer_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    viewed_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    photo_index SMALLINT NOT NULL, -- 0-based index in the media_urls array
+    duration_ms INTEGER NOT NULL, -- Duration in milliseconds
+    view_timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_photo_index_range CHECK (photo_index >= 0 AND photo_index <= 5),
+    CONSTRAINT chk_duration_positive CHECK (duration_ms > 0),
+    CONSTRAINT chk_viewer_viewed_different_photo CHECK (viewer_user_id <> viewed_user_id) -- Ensure user isn't viewing their own photos
+);
+
+-- Index optimized for calculating average duration per photo for a specific user
+CREATE INDEX idx_photo_view_durations_viewed_photo_time ON photo_view_durations (viewed_user_id, photo_index, view_timestamp DESC);
+-- Optional index if querying by viewer is common
+-- CREATE INDEX idx_photo_view_durations_viewer ON photo_view_durations (viewer_user_id);

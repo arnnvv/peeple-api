@@ -1319,6 +1319,52 @@ func (q *Queries) GetPendingVerificationUsers(ctx context.Context, verificationS
 	return items, nil
 }
 
+const getPhotoAverageViewDurations = `-- name: GetPhotoAverageViewDurations :many
+SELECT
+    photo_index,
+    COALESCE(AVG(duration_ms), 0)::float AS average_duration_ms -- Return 0 if no views for that index
+FROM photo_view_durations
+WHERE
+    viewed_user_id = $1 -- Use named param for the user whose photos were viewed
+    AND ($2::timestamptz IS NULL OR view_timestamp >= $2)
+    AND ($3::timestamptz IS NULL OR view_timestamp <= $3)
+GROUP BY photo_index
+ORDER BY photo_index
+`
+
+type GetPhotoAverageViewDurationsParams struct {
+	ViewedUserID int32
+	StartDate    pgtype.Timestamptz
+	EndDate      pgtype.Timestamptz
+}
+
+type GetPhotoAverageViewDurationsRow struct {
+	PhotoIndex        int16
+	AverageDurationMs float64
+}
+
+// Calculates the average view duration in milliseconds for each photo index
+// of a specific user, optionally filtered by a date range.
+func (q *Queries) GetPhotoAverageViewDurations(ctx context.Context, arg GetPhotoAverageViewDurationsParams) ([]GetPhotoAverageViewDurationsRow, error) {
+	rows, err := q.db.Query(ctx, getPhotoAverageViewDurations, arg.ViewedUserID, arg.StartDate, arg.EndDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetPhotoAverageViewDurationsRow
+	for rows.Next() {
+		var i GetPhotoAverageViewDurationsRow
+		if err := rows.Scan(&i.PhotoIndex, &i.AverageDurationMs); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getQuickFeed = `-- name: GetQuickFeed :many
 SELECT
     target_user.id, target_user.created_at, target_user.name, target_user.last_name, target_user.email, target_user.date_of_birth, target_user.latitude, target_user.longitude, target_user.gender, target_user.dating_intention, target_user.height, target_user.hometown, target_user.job_title, target_user.education, target_user.religious_beliefs, target_user.drinking_habit, target_user.smoking_habit, target_user.media_urls, target_user.verification_status, target_user.verification_pic, target_user.role, target_user.audio_prompt_question, target_user.audio_prompt_answer, target_user.spotlight_active_until, target_user.last_online, target_user.is_online,
@@ -1871,6 +1917,38 @@ type LogLikeProfileViewParams struct {
 // Logs when a user views a liker's profile from the 'Likes You' screen.
 func (q *Queries) LogLikeProfileView(ctx context.Context, arg LogLikeProfileViewParams) error {
 	_, err := q.db.Exec(ctx, logLikeProfileView, arg.ViewerUserID, arg.LikerUserID, arg.LikeID)
+	return err
+}
+
+const logPhotoViewDuration = `-- name: LogPhotoViewDuration :exec
+
+INSERT INTO photo_view_durations (
+    viewer_user_id, viewed_user_id, photo_index, duration_ms
+) VALUES (
+    $1, $2, $3, $4
+)
+`
+
+type LogPhotoViewDurationParams struct {
+	ViewerUserID int32
+	ViewedUserID int32
+	PhotoIndex   int16
+	DurationMs   int32
+}
+
+// ========================================
+//
+//	PHOTO VIEW DURATION QUERIES
+//
+// ========================================
+// Logs a single instance of a photo being viewed for a specific duration.
+func (q *Queries) LogPhotoViewDuration(ctx context.Context, arg LogPhotoViewDurationParams) error {
+	_, err := q.db.Exec(ctx, logPhotoViewDuration,
+		arg.ViewerUserID,
+		arg.ViewedUserID,
+		arg.PhotoIndex,
+		arg.DurationMs,
+	)
 	return err
 }
 
