@@ -607,3 +607,123 @@ SELECT
     last_online
 FROM users
 WHERE id = $1 LIMIT 1;
+
+-- ========================================
+--      ANALYTICS QUERIES (CORRECTED)
+-- ========================================
+
+-- name: LogUserProfileImpression :exec
+-- Logs when a user's profile is shown to another user.
+INSERT INTO user_profile_impressions (
+    viewer_user_id, shown_user_id, source
+) VALUES (
+    $1, $2, $3 -- Positional is fine for simple inserts if preferred, but named below for clarity
+);
+
+-- name: LogLikeProfileView :exec
+-- Logs when a user views a liker's profile from the 'Likes You' screen.
+INSERT INTO like_profile_views (
+    viewer_user_id, liker_user_id, like_id
+) VALUES (
+    $1, $2, $3
+);
+
+-- name: CountProfileImpressions :one
+-- Counts how many times a user's profile was shown within a date range.
+SELECT COUNT(*)
+FROM user_profile_impressions
+WHERE shown_user_id = @shown_user_id -- Use named param
+  AND (@start_date::timestamptz IS NULL OR impression_timestamp >= @start_date) -- Start date (inclusive)
+  AND (@end_date::timestamptz IS NULL OR impression_timestamp <= @end_date); -- End date (inclusive)
+
+
+-- name: GetApproximateProfileViewTimeSeconds :one
+-- Calculates the approximate average profile view time in seconds, based on interaction intervals.
+-- Note: This is an approximation and excludes views without interactions.
+WITH UserInteractions AS (
+    -- Combine likes and dislikes where the target user was interacted with
+    SELECT
+        l.liker_user_id AS viewer_user_id,
+        l.liked_user_id AS interacted_user_id,
+        l.created_at
+    FROM likes l
+    WHERE l.liked_user_id = @target_user_id -- Use named param for the user whose profile view time we want
+      AND (@start_date::timestamptz IS NULL OR l.created_at >= @start_date)
+      AND (@end_date::timestamptz IS NULL OR l.created_at <= @end_date)
+    UNION ALL
+    SELECT
+        d.disliker_user_id AS viewer_user_id,
+        d.disliked_user_id AS interacted_user_id,
+        d.created_at
+    FROM dislikes d
+    WHERE d.disliked_user_id = @target_user_id -- Use named param here too
+      AND (@start_date::timestamptz IS NULL OR d.created_at >= @start_date)
+      AND (@end_date::timestamptz IS NULL OR d.created_at <= @end_date)
+),
+InteractionIntervals AS (
+    SELECT
+        created_at,
+        LAG(created_at, 1) OVER (PARTITION BY viewer_user_id ORDER BY created_at ASC) as prev_created_at
+    FROM UserInteractions
+)
+SELECT
+    COALESCE(AVG(
+        LEAST( -- Apply 60-second cap
+            EXTRACT(EPOCH FROM (created_at - prev_created_at)), -- Duration in seconds
+            60.0
+        )
+    ), 0.0)::float -- Return 0.0 if no intervals found
+FROM InteractionIntervals
+WHERE prev_created_at IS NOT NULL; -- Only consider intervals where a previous interaction exists
+
+
+-- name: CountDislikesSent :one
+-- Counts dislikes sent by the user within a date range.
+SELECT COUNT(*)
+FROM dislikes
+WHERE disliker_user_id = @disliker_user_id -- Use named param
+  AND (@start_date::timestamptz IS NULL OR created_at >= @start_date)
+  AND (@end_date::timestamptz IS NULL OR created_at <= @end_date);
+
+-- name: CountDislikesReceived :one
+-- Counts dislikes received by the user within a date range.
+SELECT COUNT(*)
+FROM dislikes
+WHERE disliked_user_id = @disliked_user_id -- Use named param
+  AND (@start_date::timestamptz IS NULL OR created_at >= @start_date)
+  AND (@end_date::timestamptz IS NULL OR created_at <= @end_date);
+
+-- name: CountProfilesOpenedFromLike :one
+-- Counts how many times profiles liked by the user were opened from the 'Likes You' screen.
+SELECT COUNT(*)
+FROM like_profile_views
+WHERE liker_user_id = @liker_user_id -- Use named param
+  AND (@start_date::timestamptz IS NULL OR view_timestamp >= @start_date)
+  AND (@end_date::timestamptz IS NULL OR view_timestamp <= @end_date);
+
+
+-- name: CountImpressionsDuringSpotlight :one
+-- Counts profile impressions specifically from spotlight source within a date range.
+SELECT COUNT(*)
+FROM user_profile_impressions
+WHERE shown_user_id = @shown_user_id -- Use named param
+  AND source = 'spotlight'
+  AND (@start_date::timestamptz IS NULL OR impression_timestamp >= @start_date)
+  AND (@end_date::timestamptz IS NULL OR impression_timestamp <= @end_date);
+
+-- name: GetUserSpotlightActivationTimes :many
+-- Fetches the activation time (approximated by updated_at) and expiry time for spotlight consumables.
+SELECT
+    updated_at as potentially_activated_at,
+    u.spotlight_active_until as expires_at
+FROM user_consumables uc
+JOIN users u ON uc.user_id = u.id
+WHERE uc.user_id = @user_id -- Use named param
+  AND uc.consumable_type = 'spotlight'
+  AND u.spotlight_active_until IS NOT NULL
+  AND (
+       (@start_date::timestamptz IS NULL OR u.spotlight_active_until >= @start_date)
+       AND
+       (@end_date::timestamptz IS NULL OR uc.updated_at <= @end_date)
+      )
+ORDER BY u.spotlight_active_until DESC;

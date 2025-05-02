@@ -137,7 +137,7 @@ func setupRoutes(hub *ws.Hub) *http.ServeMux {
 	mux.HandleFunc("/api/quickfeed", authMiddleware(handlers.GetQuickFeedHandler))
 	mux.HandleFunc("/api/like", authMiddleware(handlers.LikeHandler(hub)))
 	mux.HandleFunc("/api/dislike", authMiddleware(handlers.DislikeHandler(hub)))
-	mux.HandleFunc("/api/unmatch", authMiddleware(handlers.UnmatchHandler))
+	mux.HandleFunc("/api/unmatch", authMiddleware(handlers.UnmatchHandler(hub)))
 	mux.HandleFunc("/api/report", authMiddleware(handlers.ReportHandler))
 	mux.HandleFunc("/api/likes/received", authMiddleware(handlers.GetWhoLikedYouHandler))
 	mux.HandleFunc("/api/likes/seen-until", authMiddleware(handlers.MarkLikesSeenUntilHandler))
@@ -156,6 +156,11 @@ func setupRoutes(hub *ws.Hub) *http.ServeMux {
 	mux.HandleFunc("/api/admin/verify", adminMiddleware(handlers.UpdateVerificationStatusHandler))
 
 	mux.HandleFunc("/", authMiddleware(handlers.ProtectedHandler))
+
+	mux.HandleFunc("/api/analytics/summary", authMiddleware(handlers.GetAnalyticsSummaryHandler))
+	mux.HandleFunc("/api/analytics/spotlight", authMiddleware(handlers.GetSpotlightAnalyticsHandler))
+	mux.HandleFunc("/api/analytics/log-like-profile-view", authMiddleware(handlers.LogLikeProfileViewHandler))
+	// --- END NEW ANALYTICS ROUTES ---
 
 	return mux
 }

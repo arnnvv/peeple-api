@@ -30,16 +30,17 @@ type WsMatchInfo struct {
 	InitiatingLikerUserID int32 `json:"initiating_liker_user_id"`
 }
 
-// --- NEW: Payload Struct for Like Removal Notifications ---
-// Contains the ID of the user whose like should be removed.
+// --- NEW: Payload Struct for Like/Match Removal Notifications ---
+// Contains the ID of the user whose like/match should be removed.
+// Reused for both like removal (dislike) and match removal (unmatch).
 type WsLikeRemovalInfo struct {
-	LikerUserID int32 `json:"liker_user_id"` // ID of the person whose like is to be removed
+	LikerUserID int32 `json:"liker_user_id"` // ID of the person whose like/match is to be removed from the recipient's list
 }
 
 // --- MODIFIED: WsMessage struct ---
 // Added fields to carry payloads for new message types.
 type WsMessage struct {
-	Type string `json:"type"`         // e.g., "chat_message", "status_update", "new_like_received", "new_match", "like_removed"
+	Type string `json:"type"`         // e.g., "chat_message", "status_update", "new_like_received", "new_match", "like_removed", "match_removed"
 	ID   *int64 `json:"id,omitempty"` // Usually for chat messages
 
 	// --- Chat Message Fields (Keep as is) ---
@@ -78,7 +79,7 @@ type WsMessage struct {
 	// --- NEW: Payload Fields for Like/Match Notifications ---
 	LikerInfo   *WsBasicLikerInfo  `json:"liker_info,omitempty"`   // Payload for "new_like_received"
 	MatchInfo   *WsMatchInfo       `json:"match_info,omitempty"`   // Payload for "new_match"
-	RemovalInfo *WsLikeRemovalInfo `json:"removal_info,omitempty"` // Payload for "like_removed"
+	RemovalInfo *WsLikeRemovalInfo `json:"removal_info,omitempty"` // Payload for "like_removed" and "match_removed"
 }
 
 // --- Existing functions (ChatMessageToWsMessage, Ptr, PtrInt64) ---

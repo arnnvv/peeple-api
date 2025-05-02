@@ -312,3 +312,32 @@ CREATE TRIGGER set_reaction_timestamp
 BEFORE UPDATE ON message_reactions
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
+
+-- ========================================
+--      ANALYTICS TABLES ADDITION
+-- ========================================
+
+-- Table to log when a user's profile is shown in a feed
+CREATE TABLE user_profile_impressions (
+    impression_id BIGSERIAL PRIMARY KEY,
+    viewer_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    shown_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    impression_timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    source VARCHAR(20) NOT NULL, -- e.g., 'homefeed', 'spotlight', 'likes_you_screen'
+    CONSTRAINT chk_viewer_shown_different CHECK (viewer_user_id <> shown_user_id)
+);
+CREATE INDEX idx_impressions_shown_user_source_time ON user_profile_impressions (shown_user_id, source, impression_timestamp DESC);
+CREATE INDEX idx_impressions_viewer_shown ON user_profile_impressions (viewer_user_id, shown_user_id);
+CREATE INDEX idx_impressions_timestamp ON user_profile_impressions (impression_timestamp DESC); -- Added for date range filtering
+
+-- Table to log when a user views a profile *specifically from the 'Likes You'* screen
+CREATE TABLE like_profile_views (
+    view_id BIGSERIAL PRIMARY KEY,
+    viewer_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, -- User who received the like and is viewing
+    liker_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,  -- User who sent the like (whose profile is viewed)
+    like_id INTEGER NOT NULL REFERENCES likes(id) ON DELETE CASCADE,         -- The specific like that led to the view
+    view_timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_like_profile_views_like_id ON like_profile_views (like_id);
+CREATE INDEX idx_like_profile_views_viewer_liker ON like_profile_views (viewer_user_id, liker_user_id);
+CREATE INDEX idx_like_profile_views_liker_time ON like_profile_views (liker_user_id, view_timestamp DESC); -- Useful for the analytic count by date range

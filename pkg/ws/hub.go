@@ -307,3 +307,35 @@ func (h *Hub) BroadcastLikeRemoved(recipientUserID int32, removalInfo WsLikeRemo
 		log.Printf("Hub INFO: User %d is offline, like_removed notification not sent in real-time.", recipientUserID)
 	}
 }
+
+// *** ADDED: BroadcastMatchRemoved Function ***
+// Sends a message to recipientUserID indicating that unmatcherUserID has unmatched them.
+func (h *Hub) BroadcastMatchRemoved(recipientUserID int32, unmatcherUserID int32) {
+	log.Printf("Hub INFO: Broadcasting match removal notification to User %d regarding Unmatcher %d",
+		recipientUserID, unmatcherUserID)
+
+	// Reuse WsLikeRemovalInfo payload structure:
+	// LikerUserID here means the ID of the user whose profile should be removed from the recipient's list.
+	payload := &WsLikeRemovalInfo{
+		LikerUserID: unmatcherUserID,
+	}
+
+	wsMsg := WsMessage{
+		Type:        "match_removed", // Use the new distinct type
+		RemovalInfo: payload,
+	}
+
+	messageBytes, err := json.Marshal(wsMsg)
+	if err != nil {
+		log.Printf("Hub ERROR: Failed to marshal match_removed message for recipient %d: %v", recipientUserID, err)
+		return
+	}
+
+	if h.SendToUser(recipientUserID, messageBytes) {
+		log.Printf("Hub INFO: Sent match_removed notification to user %d.", recipientUserID)
+	} else {
+		log.Printf("Hub INFO: User %d is offline, match_removed notification not sent in real-time.", recipientUserID)
+	}
+}
+
+// *** END ADDITION ***

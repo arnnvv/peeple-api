@@ -1,7 +1,8 @@
 package handlers
 
 import (
-	"encoding/json" // Import json package
+	"context" // <-- ADDED: Import context
+	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -19,12 +20,9 @@ import (
 const feedBatchSize = 15
 const defaultAgeRange = 4
 
-// --- NEW: DTO for profile items in the response ---
-// This includes all fields from GetHomeFeedRow PLUS the correctly typed Prompts
+// --- DTO for profile items in the response (No Changes) ---
 type ProfileFeedItem struct {
-	// Embed all fields from migrations.User directly for simplicity
-	// (or list them explicitly if you prefer more control)
-	ID                   int32                                `json:"ID"` // Use uppercase ID as in desired JSON
+	ID                   int32                                `json:"ID"`
 	CreatedAt            pgtype.Timestamptz                   `json:"CreatedAt"`
 	Name                 pgtype.Text                          `json:"Name"`
 	LastName             pgtype.Text                          `json:"LastName"`
@@ -34,7 +32,7 @@ type ProfileFeedItem struct {
 	Longitude            pgtype.Float8                        `json:"Longitude"`
 	Gender               migrations.NullGenderEnum            `json:"Gender"`
 	DatingIntention      migrations.NullDatingIntention       `json:"DatingIntention"`
-	Height               pgtype.Float8                        `json:"Height"` // Keep raw height if needed, or format here
+	Height               pgtype.Float8                        `json:"Height"`
 	Hometown             pgtype.Text                          `json:"Hometown"`
 	JobTitle             pgtype.Text                          `json:"JobTitle"`
 	Education            pgtype.Text                          `json:"Education"`
@@ -48,17 +46,15 @@ type ProfileFeedItem struct {
 	AudioPromptQuestion  migrations.NullAudioPrompt           `json:"AudioPromptQuestion"`
 	AudioPromptAnswer    pgtype.Text                          `json:"AudioPromptAnswer"`
 	SpotlightActiveUntil pgtype.Timestamptz                   `json:"SpotlightActiveUntil"`
-
-	// --- Added fields from GetHomeFeedRow (beyond User) ---
-	Prompts    json.RawMessage `json:"prompts"`     // Use json.RawMessage for JSONB data
-	DistanceKm float64         `json:"distance_km"` // Include distance
+	Prompts              json.RawMessage                      `json:"prompts"`
+	DistanceKm           float64                              `json:"distance_km"`
 }
 
-// Updated HomeFeedResponse to use the new DTO slice
+// --- HomeFeedResponse (No Changes) ---
 type HomeFeedResponse struct {
 	Success  bool              `json:"success"`
 	Message  string            `json:"message,omitempty"`
-	Profiles []ProfileFeedItem `json:"profiles,omitempty"` // Changed type here
+	Profiles []ProfileFeedItem `json:"profiles,omitempty"`
 	HasMore  bool              `json:"has_more"`
 }
 
@@ -67,6 +63,13 @@ func GetHomeFeedHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	ctx := r.Context()
 	queries, _ := db.GetDB()
+	if queries == nil { // <-- ADDED: Check if queries is nil
+		log.Println("ERROR: GetHomeFeedHandler: Database connection not available.")
+		utils.RespondWithJSON(w, http.StatusInternalServerError, HomeFeedResponse{
+			Success: false, Message: "Database connection error.",
+		})
+		return
+	}
 
 	if r.Method != http.MethodGet {
 		utils.RespondWithJSON(w, http.StatusMethodNotAllowed, HomeFeedResponse{
@@ -84,10 +87,9 @@ func GetHomeFeedHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	requestingUserID := int32(claims.UserID)
 
-	// --- Get Requesting User's necessary info (Location, Gender, DOB) ---
+	// --- Get Requesting User's necessary info ---
 	requestingUser, err := queries.GetUserByID(ctx, requestingUserID)
 	if err != nil {
-		// ... (error handling as before) ...
 		if errors.Is(err, pgx.ErrNoRows) {
 			log.Printf("GetHomeFeedHandler: Requesting user %d not found", requestingUserID)
 			utils.RespondWithJSON(w, http.StatusNotFound, HomeFeedResponse{
@@ -102,9 +104,8 @@ func GetHomeFeedHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if user has location set (required for distance calc)
+	// --- Location Check ---
 	if !requestingUser.Latitude.Valid || !requestingUser.Longitude.Valid {
-		// ... (error handling as before) ...
 		log.Printf("GetHomeFeedHandler: Requesting user %d missing location data.", requestingUserID)
 		utils.RespondWithJSON(w, http.StatusBadRequest, HomeFeedResponse{
 			Success: false, Message: "Please set your location in your profile to use the feed.",
@@ -112,13 +113,13 @@ func GetHomeFeedHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// --- Check if user has filters set, create defaults if not ---
+	// --- Default Filters Logic (No Changes Needed Here) ---
 	_, err = queries.GetUserFilters(ctx, requestingUserID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			// Filters don't exist, create defaults
 			log.Printf("GetHomeFeedHandler: No filters found for user %d. Creating defaults.", requestingUserID)
-
+			// (Code to calculate and upsert default filters - remains the same)
+			// ... [existing default filter creation logic] ...
 			// Calculate Default Filters (Logic remains the same)
 			defaultWhoSee := migrations.NullGenderEnum{Valid: false}
 			if requestingUser.Gender.Valid {
@@ -149,19 +150,28 @@ func GetHomeFeedHandler(w http.ResponseWriter, r *http.Request) {
 					defaultAgeMax = pgtype.Int4{Int32: int32(calcAgeMax), Valid: true}
 				}
 			}
+			// *** IMPORTANT: Ensure defaultAgeMin/Max are set if DOB is invalid ***
+			// Use fixed defaults if calculated ones aren't valid
+			if !defaultAgeMin.Valid {
+				defaultAgeMin = pgtype.Int4{Int32: fixedDefaultFilterMinAge, Valid: true}
+			}
+			if !defaultAgeMax.Valid {
+				defaultAgeMax = pgtype.Int4{Int32: fixedDefaultFilterMaxAge, Valid: true}
+			}
+			// *** END FIX ***
+
 			defaultParams := migrations.UpsertUserFiltersParams{
 				UserID:          requestingUserID,
 				WhoYouWantToSee: defaultWhoSee,
 				AgeMin:          defaultAgeMin,
 				AgeMax:          defaultAgeMax,
 				ActiveToday:     false,
-				RadiusKm:        pgtype.Int4{Valid: false}, // Let DB handle default or keep null
+				RadiusKm:        pgtype.Int4{Int32: defaultFilterRadiusKm, Valid: true}, // Use constant
 			}
 
 			// Insert the defaults
 			_, upsertErr := queries.UpsertUserFilters(ctx, defaultParams)
 			if upsertErr != nil {
-				// ... (error handling as before) ...
 				log.Printf("GetHomeFeedHandler: Failed to insert default filters for user %d: %v", requestingUserID, upsertErr)
 				utils.RespondWithJSON(w, http.StatusInternalServerError, HomeFeedResponse{
 					Success: false, Message: "Failed to initialize user filters.",
@@ -171,7 +181,6 @@ func GetHomeFeedHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("GetHomeFeedHandler: Default filters created successfully for user %d.", requestingUserID)
 
 		} else {
-			// ... (error handling as before) ...
 			log.Printf("GetHomeFeedHandler: Error fetching filters for user %d: %v", requestingUserID, err)
 			utils.RespondWithJSON(w, http.StatusInternalServerError, HomeFeedResponse{
 				Success: false, Message: "Error retrieving user filters.",
@@ -179,25 +188,20 @@ func GetHomeFeedHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// Filters now exist (either pre-existing or default)
 
 	// --- Execute Feed Query ---
 	log.Printf("GetHomeFeedHandler: Fetching feed batch (limit %d) for user %d", feedBatchSize, requestingUserID)
-	// The GetHomeFeedParams struct generated by sqlc should now only have ID and Limit
 	feedParams := migrations.GetHomeFeedParams{
 		ID:    requestingUserID,
 		Limit: int32(feedBatchSize),
 	}
-
-	// Use the updated Row struct from the generated code
-	dbProfiles, err := queries.GetHomeFeed(ctx, feedParams) // dbProfiles is []migrations.GetHomeFeedRow
+	dbProfiles, err := queries.GetHomeFeed(ctx, feedParams)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		// ... (error handling as before) ...
 		log.Printf("GetHomeFeedHandler: Database error fetching feed for user %d: %v", requestingUserID, err)
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) {
 			log.Printf("DB Error Details: Code=%s, Message=%s", pgErr.Code, pgErr.Message)
-			if pgErr.Code == "42883" { // Example check
+			if pgErr.Code == "42883" {
 				utils.RespondWithJSON(w, http.StatusInternalServerError, HomeFeedResponse{
 					Success: false, Message: "Server configuration error (e.g., missing distance function).",
 				})
@@ -210,12 +214,12 @@ func GetHomeFeedHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// --- Map DB results to the Response DTO ---
+	// --- Prepare Response (Mapping DTO) ---
 	responseProfiles := make([]ProfileFeedItem, 0, len(dbProfiles))
 	if dbProfiles != nil {
 		for _, dbProfile := range dbProfiles {
 			responseItem := ProfileFeedItem{
-				// Map fields explicitly - this ensures correct structure
+				// (Mapping code remains the same)
 				ID:                   dbProfile.ID,
 				CreatedAt:            dbProfile.CreatedAt,
 				Name:                 dbProfile.Name,
@@ -226,7 +230,7 @@ func GetHomeFeedHandler(w http.ResponseWriter, r *http.Request) {
 				Longitude:            dbProfile.Longitude,
 				Gender:               dbProfile.Gender,
 				DatingIntention:      dbProfile.DatingIntention,
-				Height:               dbProfile.Height, // Keep raw, formatting done on frontend if needed
+				Height:               dbProfile.Height,
 				Hometown:             dbProfile.Hometown,
 				JobTitle:             dbProfile.JobTitle,
 				Education:            dbProfile.Education,
@@ -240,22 +244,57 @@ func GetHomeFeedHandler(w http.ResponseWriter, r *http.Request) {
 				AudioPromptQuestion:  dbProfile.AudioPromptQuestion,
 				AudioPromptAnswer:    dbProfile.AudioPromptAnswer,
 				SpotlightActiveUntil: dbProfile.SpotlightActiveUntil,
-				Prompts:              dbProfile.Prompts, // Assign the []byte directly to json.RawMessage
+				Prompts:              dbProfile.Prompts,
 				DistanceKm:           dbProfile.DistanceKm,
 			}
 			responseProfiles = append(responseProfiles, responseItem)
 		}
 	}
-
 	log.Printf("GetHomeFeedHandler: Found %d profiles for user %d", len(responseProfiles), requestingUserID)
-
-	// Determine if more pages exist
 	hasMore := len(responseProfiles) == feedBatchSize
 
 	// --- Respond ---
 	utils.RespondWithJSON(w, http.StatusOK, HomeFeedResponse{
 		Success:  true,
-		Profiles: responseProfiles, // Use the mapped slice
+		Profiles: responseProfiles,
 		HasMore:  hasMore,
 	})
+
+	// --- ADDED: Log Impressions Asynchronously ---
+	if len(dbProfiles) > 0 {
+		go func(viewerID int32, profiles []migrations.GetHomeFeedRow) {
+			// Create a background context for the goroutine
+			bgCtx := context.Background()
+			queriesBG, dbErr := db.GetDB() // Get DB instance again for the goroutine
+			if dbErr != nil {
+				log.Printf("GetHomeFeedHandler [Goroutine]: Failed to get DB for impression logging: %v", dbErr)
+				return
+			}
+
+			impressionCount := 0
+			for _, profile := range profiles {
+				// Determine source based on spotlight status
+				source := "homefeed"
+				// Check if spotlight is active *at the time of impression*
+				if profile.SpotlightActiveUntil.Valid && profile.SpotlightActiveUntil.Time.After(time.Now()) {
+					source = "spotlight"
+				}
+
+				logParams := migrations.LogUserProfileImpressionParams{
+					ViewerUserID: viewerID,
+					ShownUserID:  profile.ID,
+					Source:       source,
+				}
+				err := queriesBG.LogUserProfileImpression(bgCtx, logParams)
+				if err != nil {
+					// Log error but don't stop processing other impressions
+					log.Printf("GetHomeFeedHandler [Goroutine]: Failed to log impression for viewer %d -> shown %d: %v", viewerID, profile.ID, err)
+				} else {
+					impressionCount++
+				}
+			}
+			log.Printf("GetHomeFeedHandler [Goroutine]: Logged %d impressions for viewer %d.", impressionCount, viewerID)
+		}(requestingUserID, dbProfiles) // Pass necessary data to the goroutine
+	}
+	// --- END Added Impression Logging ---
 }

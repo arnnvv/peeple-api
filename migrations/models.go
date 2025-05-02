@@ -782,6 +782,14 @@ type Like struct {
 	CreatedAt         pgtype.Timestamptz
 }
 
+type LikeProfileView struct {
+	ViewID        int64
+	ViewerUserID  int32
+	LikerUserID   int32
+	LikeID        int32
+	ViewTimestamp pgtype.Timestamptz
+}
+
 type MessageReaction struct {
 	ID        int64
 	MessageID int64
@@ -847,6 +855,14 @@ type UserConsumable struct {
 	ConsumableType PremiumFeatureType
 	Quantity       int32
 	UpdatedAt      pgtype.Timestamptz
+}
+
+type UserProfileImpression struct {
+	ImpressionID        int64
+	ViewerUserID        int32
+	ShownUserID         int32
+	ImpressionTimestamp pgtype.Timestamptz
+	Source              string
 }
 
 type UserSubscription struct {
