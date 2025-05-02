@@ -7,83 +7,79 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"          // Import pgtype for Timestamptz
 )
 
-// --- NEW: Payload Struct for New Like Notifications ---
-// Contains basic info about the user who liked someone.
 type WsBasicLikerInfo struct {
 	LikerUserID        int32              `json:"liker_user_id"`
-	Name               string             `json:"name"` // Combined Name + LastName
+	Name               string             `json:"name"`
 	FirstProfilePicURL string             `json:"first_profile_pic_url,omitempty"`
 	IsRose             bool               `json:"is_rose"`
 	LikeComment        *string            `json:"like_comment,omitempty"`
-	LikedAt            pgtype.Timestamptz `json:"liked_at"` // Use pgtype for consistency
+	LikedAt            pgtype.Timestamptz `json:"liked_at"`
 }
 
-// --- NEW: Payload Struct for New Match Notifications ---
-// Contains info about the new match and the like that triggered it.
 type WsMatchInfo struct {
-	MatchedUserID      int32      `json:"matched_user_id"`
-	Name               string     `json:"name"` // Combined Name + LastName
-	FirstProfilePicURL string     `json:"first_profile_pic_url,omitempty"`
-	IsOnline           bool       `json:"is_online"`
-	LastOnline         *time.Time `json:"last_online,omitempty"` // Use *time.Time for JSON marshal
-	// ** Crucial addition: ID of the user whose like should be removed from the recipient's 'Likes You' list **
-	InitiatingLikerUserID int32 `json:"initiating_liker_user_id"`
+	MatchedUserID         int32      `json:"matched_user_id"`
+	Name                  string     `json:"name"`
+	FirstProfilePicURL    string     `json:"first_profile_pic_url,omitempty"`
+	IsOnline              bool       `json:"is_online"`
+	LastOnline            *time.Time `json:"last_online,omitempty"`
+	InitiatingLikerUserID int32      `json:"initiating_liker_user_id"`
 }
 
-// --- NEW: Payload Struct for Like/Match Removal Notifications ---
-// Contains the ID of the user whose like/match should be removed.
-// Reused for both like removal (dislike) and match removal (unmatch).
 type WsLikeRemovalInfo struct {
-	LikerUserID int32 `json:"liker_user_id"` // ID of the person whose like/match is to be removed from the recipient's list
+	LikerUserID int32 `json:"liker_user_id"`
 }
 
-// --- MODIFIED: WsMessage struct ---
-// Added fields to carry payloads for new message types.
 type WsMessage struct {
-	Type string `json:"type"`         // e.g., "chat_message", "status_update", "new_like_received", "new_match", "like_removed", "match_removed"
-	ID   *int64 `json:"id,omitempty"` // Usually for chat messages
+	Type string `json:"type"`
+	ID   *int64 `json:"id,omitempty"`
 
-	// --- Chat Message Fields (Keep as is) ---
 	SenderUserID     *int32  `json:"sender_user_id,omitempty"`
 	RecipientUserID  *int32  `json:"recipient_user_id,omitempty"`
 	Text             *string `json:"text,omitempty"`
 	MediaURL         *string `json:"media_url,omitempty"`
 	MediaType        *string `json:"media_type,omitempty"`
-	SentAt           *string `json:"sent_at,omitempty"` // ISO 8601 format string (outgoing)
+	SentAt           *string `json:"sent_at,omitempty"`
 	ReplyToMessageID *int64  `json:"reply_to_message_id,omitempty"`
-	MessageID        *int64  `json:"message_id,omitempty"` // Used for Reactions, MarkRead
+	MessageID        *int64  `json:"message_id,omitempty"`
 
-	// --- Reaction Fields (Keep as is) ---
 	Emoji         *string `json:"emoji,omitempty"`
 	ReactorUserID *int32  `json:"reactor_user_id,omitempty"`
 	IsRemoved     *bool   `json:"is_removed,omitempty"`
 
-	// --- Status Update Fields (Keep as is) ---
-	UserID *int32  `json:"user_id,omitempty"` // User whose status changed
-	Status *string `json:"status,omitempty"`  // "online" or "offline"
+	UserID *int32  `json:"user_id,omitempty"`
+	Status *string `json:"status,omitempty"`
 
-	// --- Mark Read Fields (Keep as is) ---
-	OtherUserID  *int32 `json:"other_user_id,omitempty"`  // User whose messages were marked read
-	ReaderUserID *int32 `json:"reader_user_id,omitempty"` // User who read the messages
+	OtherUserID  *int32 `json:"other_user_id,omitempty"`
+	ReaderUserID *int32 `json:"reader_user_id,omitempty"`
 
-	// --- Typing/Recording Fields (Keep as is) ---
 	IsTyping        *bool  `json:"is_typing,omitempty"`
 	TypingUserID    *int32 `json:"typing_user_id,omitempty"`
 	IsRecording     *bool  `json:"is_recording,omitempty"`
 	RecordingUserID *int32 `json:"recording_user_id,omitempty"`
 
-	// --- General Info/Error/Ack Fields (Keep as is) ---
 	Content *string `json:"content,omitempty"`
 	Count   *int64  `json:"count,omitempty"`
 
-	// --- NEW: Payload Fields for Like/Match Notifications ---
-	LikerInfo   *WsBasicLikerInfo  `json:"liker_info,omitempty"`   // Payload for "new_like_received"
-	MatchInfo   *WsMatchInfo       `json:"match_info,omitempty"`   // Payload for "new_match"
-	RemovalInfo *WsLikeRemovalInfo `json:"removal_info,omitempty"` // Payload for "like_removed" and "match_removed"
+	LikerInfo   *WsBasicLikerInfo  `json:"liker_info,omitempty"`
+	MatchInfo   *WsMatchInfo       `json:"match_info,omitempty"`
+	RemovalInfo *WsLikeRemovalInfo `json:"removal_info,omitempty"`
 }
 
-// --- Existing functions (ChatMessageToWsMessage, Ptr, PtrInt64) ---
-// No changes needed for these existing functions.
+const (
+	RedisMsgTypeDirect           = "direct"
+	RedisMsgTypeBroadcastMatches = "broadcast_matches"
+	// broadcast_all
+)
+
+type RedisWsMessage struct {
+	Type            string  `json:"type"`
+	TargetUserID    *int32  `json:"target_user_id"`
+	TargetUserIDs   []int32 `json:"target_user_ids"`
+	SenderUserID    int32   `json:"sender_user_id"`
+	OriginalPayload []byte  `json:"original_payload"`
+}
+
+const RedisChannelName = "peeple-websocket-messages"
 
 func ChatMessageToWsMessage(dbMsg migrations.GetConversationMessagesRow) WsMessage {
 	sentAtStr := dbMsg.SentAt.Time.UTC().Format(time.RFC3339Nano)
@@ -112,8 +108,6 @@ func ChatMessageToWsMessage(dbMsg migrations.GetConversationMessagesRow) WsMessa
 	if dbMsg.ReplyToMessageID.Valid {
 		wsMsg.ReplyToMessageID = &dbMsg.ReplyToMessageID.Int64
 	}
-	// Note: Reactions and CurrentUserReaction are not included here as they are handled separately
-	// or added during the conversation retrieval process before sending.
 	return wsMsg
 }
 

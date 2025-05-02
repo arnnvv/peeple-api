@@ -12,6 +12,7 @@ import (
 
 	"github.com/arnnvv/peeple-api/pkg/db"
 	"github.com/arnnvv/peeple-api/pkg/handlers"
+	"github.com/arnnvv/peeple-api/pkg/pbsb"
 	"github.com/arnnvv/peeple-api/pkg/token"
 	"github.com/arnnvv/peeple-api/pkg/ws"
 )
@@ -28,7 +29,7 @@ type Config struct {
 
 func loadConfig() Config {
 	cfg := Config{
-		Port:        getEnv("PORT", ""),
+		Port:        getEnv("PORT", "8081"),
 		DatabaseURL: getEnv("DATABASE_URL", ""),
 		ServerTimeout: struct {
 			ReadHeader time.Duration
@@ -65,11 +66,23 @@ func main() {
 	}
 	defer db.CloseDB()
 
+	redisClient, err := pbsb.NewRedisClient()
+	if err != nil {
+		log.Fatalf("Failed to initialize Redis client: %v", err)
+	}
+	defer func() {
+		if err := redisClient.Close(); err != nil {
+			log.Printf("Error closing Redis client: %v", err)
+		} else {
+			log.Println("Redis client closed.")
+		}
+	}()
+
 	queries, err := db.GetDB()
 	if err != nil {
 		log.Fatalf("Failed to get DB queries for Hub: %v", err)
 	}
-	hub := ws.NewHub(queries)
+	hub := ws.NewHub(queries, redisClient)
 	go hub.Run()
 
 	server := &http.Server{
@@ -87,6 +100,10 @@ func main() {
 	go func() {
 		<-sig
 		log.Println("Shutdown signal received")
+
+		log.Println("Stopping Hub...")
+		hub.Stop()
+		log.Println("Hub stopped.")
 
 		shutdownCtx, cancel := context.WithTimeout(serverCtx, 30*time.Second)
 		defer cancel()
