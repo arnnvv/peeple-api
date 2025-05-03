@@ -3,7 +3,6 @@ package ws
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -62,7 +61,7 @@ func (c *Client) sendStopTypingStatus(recipientID int32) {
 	}
 	statusBytes, marshalErr := json.Marshal(stopTypingMsg)
 	if marshalErr != nil {
-		log.Printf("Client Helper ERROR: Failed to marshal stop typing status message for user %d -> %d: %v", c.UserID, recipientID, marshalErr)
+		log.Printf("Client Helper ERROR: Failed marshal stop typing status %d -> %d: %v", c.UserID, recipientID, marshalErr)
 		return
 	}
 	_ = c.hub.SendToUser(recipientID, statusBytes)
@@ -79,7 +78,7 @@ func (c *Client) sendStopRecordingStatus(recipientID int32) {
 	}
 	statusBytes, marshalErr := json.Marshal(stopRecordingMsg)
 	if marshalErr != nil {
-		log.Printf("Client Helper ERROR: Failed to marshal stop recording status message for user %d -> %d: %v", c.UserID, recipientID, marshalErr)
+		log.Printf("Client Helper ERROR: Failed marshal stop recording status %d -> %d: %v", c.UserID, recipientID, marshalErr)
 		return
 	}
 	_ = c.hub.SendToUser(recipientID, statusBytes)
@@ -88,26 +87,20 @@ func (c *Client) sendStopRecordingStatus(recipientID int32) {
 func (c *Client) readPump() {
 	defer func() {
 		log.Printf("Client ReadPump: Unregistering and closing connection for user %d", c.UserID)
-
 		c.typingMu.Lock()
 		currentTypingTo := c.typingToUserID
 		c.typingToUserID = 0
 		c.typingMu.Unlock()
-
 		if currentTypingTo != 0 {
-			log.Printf("Client ReadPump: Sending final stop typing from %d to %d on disconnect.", c.UserID, currentTypingTo)
 			c.sendStopTypingStatus(currentTypingTo)
 		}
-
 		c.recordingMu.Lock()
 		currentRecordingTo := c.recordingToUserID
 		c.recordingToUserID = 0
 		c.recordingMu.Unlock()
 		if currentRecordingTo != 0 {
-			log.Printf("Client ReadPump: Sending final stop recording from %d to %d on disconnect.", c.UserID, currentRecordingTo)
 			c.sendStopRecordingStatus(currentRecordingTo)
 		}
-
 		c.hub.unregister <- c
 		c.conn.Close()
 		log.Printf("Client ReadPump: Finished cleanup for user %d", c.UserID)
@@ -121,8 +114,9 @@ func (c *Client) readPump() {
 	})
 
 	queries, errDb := db.GetDB()
-	if errDb != nil || queries == nil {
-		log.Printf("Client ReadPump FATAL: Cannot get DB queries for user %d: %v", c.UserID, errDb)
+	pool, errPool := db.GetPool()
+	if errDb != nil || queries == nil || errPool != nil || pool == nil {
+		log.Printf("Client ReadPump FATAL: Cannot get DB queries/pool for user %d: DB Err: %v, Pool Err: %v", c.UserID, errDb, errPool)
 		return
 	}
 
@@ -187,10 +181,10 @@ func (c *Client) readPump() {
 				originalMsg, errVal := queries.GetMessageSenderRecipient(ctx, replyToID)
 				if errVal != nil {
 					errMsgContent := "Error validating reply message."
-					if errors.Is(errVal, pgx.ErrNoRows) || errors.Is(errVal, sql.ErrNoRows) {
+					if errors.Is(errVal, pgx.ErrNoRows) {
 						errMsgContent = "Message you tried to reply to does not exist."
 					} else {
-						log.Printf("Client ReadPump ERROR: Failed to fetch original message %d for reply validation: %v", replyToID, errVal)
+						log.Printf("Client ReadPump ERROR: Failed to fetch original message %d for reply: %v", replyToID, errVal)
 					}
 					c.sendWsError(errMsgContent)
 					continue
@@ -211,7 +205,7 @@ func (c *Client) readPump() {
 			}
 			mutualLike, errLikeCheck := queries.CheckMutualLikeExists(ctx, mutualLikeParams)
 			if errLikeCheck != nil {
-				log.Printf("Client ReadPump ERROR: Failed to check mutual like between %d and %d: %v", c.UserID, recipientID, errLikeCheck)
+				log.Printf("Client ReadPump ERROR: Failed check mutual like %d -> %d: %v", c.UserID, recipientID, errLikeCheck)
 				c.sendWsError("Failed to check send permission")
 				continue
 			}
@@ -221,7 +215,7 @@ func (c *Client) readPump() {
 			}
 			savedMsg, dbErr := queries.CreateChatMessage(ctx, createParams)
 			if dbErr != nil {
-				log.Printf("Client ReadPump ERROR: Failed to save chat message from %d to %d: %v", c.UserID, recipientID, dbErr)
+				log.Printf("Client ReadPump ERROR: Failed save chat msg %d -> %d: %v", c.UserID, recipientID, dbErr)
 				c.sendWsError("Failed to save message")
 				continue
 			}
@@ -231,9 +225,6 @@ func (c *Client) readPump() {
 				ID:              &savedMsg.ID,
 				SenderUserID:    &savedMsg.SenderUserID,
 				RecipientUserID: &savedMsg.RecipientUserID,
-				Text:            nil,
-				MediaURL:        nil,
-				MediaType:       nil,
 				SentAt:          Ptr(savedMsg.SentAt.Time.UTC().Format(time.RFC3339Nano)),
 			}
 			if savedMsg.MessageText.Valid {
@@ -250,41 +241,41 @@ func (c *Client) readPump() {
 			}
 			msgBytes, marshalErr := json.Marshal(wsMsgToSend)
 			if marshalErr != nil {
-				log.Printf("Client ReadPump ERROR: Failed to marshal outgoing message ID %d: %v", savedMsg.ID, marshalErr)
+				log.Printf("Client ReadPump ERROR: Failed marshal outgoing msg ID %d: %v", savedMsg.ID, marshalErr)
+				continue
+			}
+			if !c.hub.SendToUser(recipientID, msgBytes) {
+				ackMsg := WsMessage{
+					Type:    "message_ack",
+					Content: Ptr("Message sent, recipient offline."),
+					ID:      &savedMsg.ID,
+				}
+				ackBytes, _ := json.Marshal(ackMsg)
+				select {
+				case c.Send <- ackBytes:
+				default:
+				}
 			} else {
-				if !c.hub.SendToUser(recipientID, msgBytes) {
-					ackMsg := WsMessage{
-						Type:    "message_ack",
-						Content: Ptr("Message sent, recipient offline."),
-						ID:      &savedMsg.ID,
-					}
-					ackBytes, _ := json.Marshal(ackMsg)
-					select {
-					case c.Send <- ackBytes:
-					default:
-					}
-				} else {
-					ackMsg := WsMessage{
-						Type:    "message_ack",
-						Content: Ptr("Message delivered."),
-						ID:      &savedMsg.ID,
-					}
-					ackBytes, _ := json.Marshal(ackMsg)
-					select {
-					case c.Send <- ackBytes:
-					default:
-					}
+				ackMsg := WsMessage{
+					Type:    "message_ack",
+					Content: Ptr("Message delivered."),
+					ID:      &savedMsg.ID,
+				}
+				ackBytes, _ := json.Marshal(ackMsg)
+				select {
+				case c.Send <- ackBytes:
+				default:
 				}
 			}
 
 		case "react_to_message":
 			reactorUserID := c.UserID
 			if msg.MessageID == nil || *msg.MessageID <= 0 {
-				c.sendWsError("Valid message_id is required for reaction")
+				c.sendWsError("Valid message_id required for reaction")
 				continue
 			}
 			if msg.Emoji == nil || *msg.Emoji == "" || utf8.RuneCountInString(*msg.Emoji) > 10 {
-				c.sendWsError("Valid emoji is required (1-10 characters) for reaction")
+				c.sendWsError("Valid emoji required (1-10 chars) for reaction")
 				continue
 			}
 			targetMessageID := *msg.MessageID
@@ -292,10 +283,10 @@ func (c *Client) readPump() {
 			msgParticipants, err := queries.GetMessageSenderRecipient(ctx, targetMessageID)
 			if err != nil {
 				errMsg := "Error validating reaction message"
-				if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+				if errors.Is(err, pgx.ErrNoRows) {
 					errMsg = fmt.Sprintf("Message with ID %d not found.", targetMessageID)
 				} else {
-					log.Printf("Client ReadPump ERROR: Failed to fetch message participants for reaction (MsgID: %d): %v", targetMessageID, err)
+					log.Printf("Client ReadPump ERROR: Failed fetch msg participants for reaction (MsgID: %d): %v", targetMessageID, err)
 				}
 				c.sendWsError(errMsg)
 				continue
@@ -309,12 +300,12 @@ func (c *Client) readPump() {
 					MessageID: targetMessageID,
 					UserID:    reactorUserID,
 				})
-			if err != nil && !errors.Is(err, pgx.ErrNoRows) && !errors.Is(err, sql.ErrNoRows) {
-				log.Printf("Client ReadPump ERROR: Failed to check existing reaction for user %d on message %d: %v", reactorUserID, targetMessageID, err)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				log.Printf("Client ReadPump ERROR: Failed check existing reaction user %d msg %d: %v", reactorUserID, targetMessageID, err)
 				c.sendWsError("Failed to check existing reaction")
 				continue
 			}
-			reactionExists := !errors.Is(err, pgx.ErrNoRows) && !errors.Is(err, sql.ErrNoRows)
+			reactionExists := !errors.Is(err, pgx.ErrNoRows)
 			var finalEmoji string
 			var wasRemoved bool
 			var dbErr error
@@ -331,7 +322,7 @@ func (c *Client) readPump() {
 					wasRemoved = false
 					ackContent = "Reaction added."
 				} else {
-					log.Printf("Client ReadPump ERROR: Failed to add reaction for user %d: %v", reactorUserID, dbErr)
+					log.Printf("Client ReadPump ERROR: Failed add reaction user %d: %v", reactorUserID, dbErr)
 				}
 			} else {
 				if existingReaction.Emoji == reactionEmoji {
@@ -345,7 +336,7 @@ func (c *Client) readPump() {
 						wasRemoved = true
 						ackContent = "Reaction removed."
 					} else {
-						log.Printf("Client ReadPump ERROR: Failed to delete reaction for user %d: %v", reactorUserID, dbErr)
+						log.Printf("Client ReadPump ERROR: Failed delete reaction user %d: %v", reactorUserID, dbErr)
 					}
 				} else {
 					updateParams := migrations.UpsertMessageReactionParams{
@@ -359,7 +350,7 @@ func (c *Client) readPump() {
 						wasRemoved = false
 						ackContent = "Reaction updated."
 					} else {
-						log.Printf("Client ReadPump ERROR: Failed to update reaction for user %d: %v", reactorUserID, dbErr)
+						log.Printf("Client ReadPump ERROR: Failed update reaction user %d: %v", reactorUserID, dbErr)
 					}
 				}
 			}
@@ -383,11 +374,11 @@ func (c *Client) readPump() {
 		case "mark_read":
 			recipientUserID := c.UserID
 			if msg.OtherUserID == nil || *msg.OtherUserID <= 0 {
-				c.sendWsError("Valid other_user_id is required for mark_read")
+				c.sendWsError("Valid other_user_id required for mark_read")
 				continue
 			}
 			if msg.MessageID == nil || *msg.MessageID <= 0 {
-				c.sendWsError("Valid message_id (last read) is required for mark_read")
+				c.sendWsError("Valid message_id (last read) required for mark_read")
 				continue
 			}
 			senderUserID := *msg.OtherUserID
@@ -399,11 +390,11 @@ func (c *Client) readPump() {
 			_, errCheck := queries.GetMessageSenderRecipient(ctx, lastMessageID)
 			if errCheck != nil {
 				errMsg := "Error validating message ID for mark read"
-				if errors.Is(errCheck, pgx.ErrNoRows) || errors.Is(errCheck, sql.ErrNoRows) {
+				if errors.Is(errCheck, pgx.ErrNoRows) {
 					errMsg = fmt.Sprintf("Invalid message ID (%d) provided for mark read.", lastMessageID)
 					log.Printf("Client ReadPump WARN: %s (User: %d)", errMsg, c.UserID)
 				} else {
-					log.Printf("Client ReadPump ERROR: Failed to check existence for mark_read message ID %d: %v", lastMessageID, errCheck)
+					log.Printf("Client ReadPump ERROR: Failed check existence mark_read msg ID %d: %v", lastMessageID, errCheck)
 				}
 				c.sendWsError(errMsg)
 				continue
@@ -415,12 +406,12 @@ func (c *Client) readPump() {
 			}
 			cmdTag, err := queries.MarkMessagesAsReadUntil(ctx, params)
 			if err != nil {
-				log.Printf("Client ReadPump ERROR: Failed to update messages read status for user %d from user %d: %v", recipientUserID, senderUserID, err)
+				log.Printf("Client ReadPump ERROR: Failed update messages read status user %d from user %d: %v", recipientUserID, senderUserID, err)
 				c.sendWsError("Failed to update message status")
 				continue
 			}
 			rowsAffected := cmdTag.RowsAffected()
-			log.Printf("Client ReadPump INFO: Successfully marked %d messages as read for user %d from user %d (up to ID %d)", rowsAffected, recipientUserID, senderUserID, lastMessageID)
+			log.Printf("Client ReadPump INFO: Marked %d messages read user %d from %d (up to ID %d)", rowsAffected, recipientUserID, senderUserID, lastMessageID)
 			ackContent := fmt.Sprintf("Marked %d messages from user %d as read.", rowsAffected, senderUserID)
 			ackMsg := WsMessage{
 				Type:        "mark_read_ack",
@@ -445,9 +436,7 @@ func (c *Client) readPump() {
 					log.Printf("Client ReadPump ERROR: Failed marshal messages_read_update: %v", errMarshal)
 				} else {
 					if !c.hub.SendToUser(senderUserID, readUpdateBytes) {
-						log.Printf("Client ReadPump DEBUG: User %d (sender) is offline, cannot send read receipt.", senderUserID)
 					} else {
-						log.Printf("Client ReadPump INFO: Sent read receipt to user %d (up to msg %d)", senderUserID, lastMessageID)
 					}
 				}
 			}
@@ -455,11 +444,11 @@ func (c *Client) readPump() {
 		case "typing_event":
 			senderUserID := c.UserID
 			if msg.RecipientUserID == nil || *msg.RecipientUserID <= 0 {
-				c.sendWsError("RecipientUserID is required for typing event")
+				c.sendWsError("RecipientUserID required for typing event")
 				continue
 			}
 			if msg.IsTyping == nil {
-				c.sendWsError("IsTyping boolean is required for typing event")
+				c.sendWsError("IsTyping boolean required for typing event")
 				continue
 			}
 			recipientID := *msg.RecipientUserID
@@ -474,7 +463,7 @@ func (c *Client) readPump() {
 			}
 			mutualLike, errLikeCheck := queries.CheckMutualLikeExists(ctx, mutualLikeParams)
 			if errLikeCheck != nil {
-				log.Printf("Client ReadPump ERROR: Failed to check mutual like for typing indicator (%d -> %d): %v", senderUserID, recipientID, errLikeCheck)
+				log.Printf("Client ReadPump ERROR: Failed check mutual like typing (%d -> %d): %v", senderUserID, recipientID, errLikeCheck)
 				c.sendWsError("Failed to check match status")
 				continue
 			}
@@ -509,7 +498,7 @@ func (c *Client) readPump() {
 			}
 			statusBytes, marshalErr := json.Marshal(typingStatusMsg)
 			if marshalErr != nil {
-				log.Printf("Client ReadPump ERROR: Failed to marshal typing status message for user %d -> %d: %v", senderUserID, recipientID, marshalErr)
+				log.Printf("Client ReadPump ERROR: Failed marshal typing status %d -> %d: %v", senderUserID, recipientID, marshalErr)
 				continue
 			}
 			if !c.hub.SendToUser(recipientID, statusBytes) { /* offline */
@@ -517,30 +506,27 @@ func (c *Client) readPump() {
 
 		case "recording_event":
 			senderUserID := c.UserID
-
 			if msg.RecipientUserID == nil || *msg.RecipientUserID <= 0 {
-				c.sendWsError("RecipientUserID is required for recording event")
+				c.sendWsError("RecipientUserID required for recording event")
 				continue
 			}
 			if msg.IsRecording == nil {
-				c.sendWsError("IsRecording boolean is required for recording event")
+				c.sendWsError("IsRecording boolean required for recording event")
 				continue
 			}
 			recipientID := *msg.RecipientUserID
 			isRecordingState := *msg.IsRecording
-
 			if recipientID == senderUserID {
 				c.sendWsError("Cannot send recording indicator to yourself")
 				continue
 			}
-
 			mutualLikeParams := migrations.CheckMutualLikeExistsParams{
 				LikerUserID: senderUserID,
 				LikedUserID: recipientID,
 			}
 			mutualLike, errLikeCheck := queries.CheckMutualLikeExists(ctx, mutualLikeParams)
 			if errLikeCheck != nil {
-				log.Printf("Client ReadPump ERROR: Failed to check mutual like for recording indicator (%d -> %d): %v", senderUserID, recipientID, errLikeCheck)
+				log.Printf("Client ReadPump ERROR: Failed check mutual like recording (%d -> %d): %v", senderUserID, recipientID, errLikeCheck)
 				c.sendWsError("Failed to check match status")
 				continue
 			}
@@ -548,32 +534,26 @@ func (c *Client) readPump() {
 				c.sendWsError("Can only send recording status to matched users")
 				continue
 			}
-
 			c.recordingMu.Lock()
 			currentRecordingTo := c.recordingToUserID
 			var oldRecipientID int32 = 0
-
 			if isRecordingState {
 				if currentRecordingTo != 0 && currentRecordingTo != recipientID {
 					oldRecipientID = currentRecordingTo
-					log.Printf("Client ReadPump: User %d switching recording from %d to %d.", senderUserID, oldRecipientID, recipientID)
 				}
 				c.recordingToUserID = recipientID
 			} else {
 				if currentRecordingTo == recipientID {
 					c.recordingToUserID = 0
 				} else {
-					log.Printf("Client ReadPump: User %d sent stop recording for %d, but was marked as recording to %d. Ignoring.", senderUserID, recipientID, currentRecordingTo)
 					c.recordingMu.Unlock()
 					continue
 				}
 			}
 			c.recordingMu.Unlock()
-
 			if oldRecipientID != 0 {
 				c.sendStopRecordingStatus(oldRecipientID)
 			}
-
 			recordingStatusMsg := WsMessage{
 				Type:            "recording_status",
 				RecordingUserID: &senderUserID,
@@ -581,14 +561,73 @@ func (c *Client) readPump() {
 			}
 			statusBytes, marshalErr := json.Marshal(recordingStatusMsg)
 			if marshalErr != nil {
-				log.Printf("Client ReadPump ERROR: Failed to marshal recording status message for user %d -> %d: %v", senderUserID, recipientID, marshalErr)
+				log.Printf("Client ReadPump ERROR: Failed marshal recording status %d -> %d: %v", senderUserID, recipientID, marshalErr)
 				continue
 			}
+			if !c.hub.SendToUser(recipientID, statusBytes) { /* offline */
+			}
 
-			if !c.hub.SendToUser(recipientID, statusBytes) {
-				// log.Printf("Client ReadPump DEBUG: Recording status (%t) not sent (%d -> %d), recipient offline.", isRecordingState, senderUserID, recipientID) // Can be noisy
+		case "send_like":
+			if msg.LikePayload == nil {
+				c.sendWsError("Missing like_payload for send_like message")
+				continue
+			}
+			err := ProcessLike(ctx, queries, pool, c.hub, c.UserID, *msg.LikePayload)
+			if err != nil {
+				log.Printf("Client ReadPump ERROR: Processing Like failed for user %d: %v", c.UserID, err)
+				c.sendWsError(err.Error())
 			} else {
-				// log.Printf("Client ReadPump DEBUG: Sent recording status (%t) for user %d to user %d.", isRecordingState, senderUserID, recipientID) // Can be noisy
+				ackMsg := WsMessage{
+					Type:    "like_ack",
+					Content: Ptr("Like processed successfully."),
+				}
+				ackBytes, _ := json.Marshal(ackMsg)
+				select {
+				case c.Send <- ackBytes:
+				default:
+				}
+			}
+
+		case "send_dislike":
+			if msg.DislikePayload == nil {
+				c.sendWsError("Missing dislike_payload for send_dislike message")
+				continue
+			}
+			err := ProcessDislike(ctx, queries, c.hub, c.UserID, *msg.DislikePayload)
+			if err != nil {
+				log.Printf("Client ReadPump ERROR: Processing Dislike failed for user %d: %v", c.UserID, err)
+				c.sendWsError(err.Error())
+			} else {
+				ackMsg := WsMessage{
+					Type:    "dislike_ack",
+					Content: Ptr("Dislike processed successfully."),
+				}
+				ackBytes, _ := json.Marshal(ackMsg)
+				select {
+				case c.Send <- ackBytes:
+				default:
+				}
+			}
+
+		case "send_unmatch":
+			if msg.UnmatchPayload == nil {
+				c.sendWsError("Missing unmatch_payload for send_unmatch message")
+				continue
+			}
+			err := ProcessUnmatch(ctx, queries, pool, c.hub, c.UserID, *msg.UnmatchPayload)
+			if err != nil {
+				log.Printf("Client ReadPump ERROR: Processing Unmatch failed for user %d: %v", c.UserID, err)
+				c.sendWsError(err.Error())
+			} else {
+				ackMsg := WsMessage{
+					Type:    "unmatch_ack",
+					Content: Ptr("Unmatch processed successfully."),
+				}
+				ackBytes, _ := json.Marshal(ackMsg)
+				select {
+				case c.Send <- ackBytes:
+				default:
+				}
 			}
 
 		default:
@@ -658,7 +697,7 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request, userID int32) {
 	select {
 	case client.Send <- infoBytes:
 	default:
-		log.Printf("ServeWs: Failed to send initial info message to user %d, channel might be closed.", userID)
+		log.Printf("ServeWs: Failed send initial info msg user %d.", userID)
 	}
 }
 
@@ -669,13 +708,13 @@ func (c *Client) sendWsError(errorMessage string) {
 	}
 	errBytes, err := json.Marshal(errMsg)
 	if err != nil {
-		log.Printf("Client ReadPump ERROR: Failed to marshal error message: %v", err)
+		log.Printf("Client ReadPump ERROR: Failed marshal error msg: %v", err)
 		return
 	}
 	select {
 	case c.Send <- errBytes:
 	default:
-		log.Printf("Client ReadPump: Send channel closed for user %d while sending error: %s", c.UserID, errorMessage)
+		log.Printf("Client ReadPump: Send channel closed user %d sending error: %s", c.UserID, errorMessage)
 	}
 }
 

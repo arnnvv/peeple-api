@@ -1,3 +1,4 @@
+// main.go
 package main
 
 import (
@@ -132,12 +133,13 @@ func setupRoutes(hub *ws.Hub) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	actualChatHandler := handlers.ChatHandler(hub)
+	authMiddleware := token.AuthMiddleware
+	mux.HandleFunc("/chat", authMiddleware(actualChatHandler))
 
 	mux.HandleFunc("/api/auth/google/verify", handlers.GoogleAuthHandler)
 	mux.HandleFunc("/token", token.GenerateTokenHandler)
 	mux.HandleFunc("/test", handlers.TestHandler)
 
-	authMiddleware := token.AuthMiddleware
 	mux.HandleFunc("/api/auth-status", authMiddleware(handlers.CheckAuthStatus))
 	mux.HandleFunc("/api/profile", authMiddleware(handlers.CreateProfile))
 	mux.HandleFunc("/api/profile/location-gender", authMiddleware(handlers.UpdateLocationGenderHandler))
@@ -152,16 +154,12 @@ func setupRoutes(hub *ws.Hub) *http.ServeMux {
 	mux.HandleFunc("/api/app-opened", authMiddleware(handlers.LogAppOpenHandler))
 	mux.HandleFunc("/api/homefeed", authMiddleware(handlers.GetHomeFeedHandler))
 	mux.HandleFunc("/api/quickfeed", authMiddleware(handlers.GetQuickFeedHandler))
-	mux.HandleFunc("/api/like", authMiddleware(handlers.LikeHandler(hub)))
-	mux.HandleFunc("/api/dislike", authMiddleware(handlers.DislikeHandler(hub)))
-	mux.HandleFunc("/api/unmatch", authMiddleware(handlers.UnmatchHandler(hub)))
 	mux.HandleFunc("/api/report", authMiddleware(handlers.ReportHandler))
 	mux.HandleFunc("/api/likes/received", authMiddleware(handlers.GetWhoLikedYouHandler))
 	mux.HandleFunc("/api/likes/seen-until", authMiddleware(handlers.MarkLikesSeenUntilHandler))
 	mux.HandleFunc("/api/liker-profile/", authMiddleware(handlers.GetLikerProfileHandler))
 	mux.HandleFunc("/api/matches", authMiddleware(handlers.GetMatchesHandler))
 	mux.HandleFunc("/api/iap/verify", authMiddleware(handlers.VerifyPurchaseHandler))
-	mux.HandleFunc("/chat", authMiddleware(actualChatHandler))
 	mux.HandleFunc("/api/conversation", authMiddleware(handlers.GetConversationHandler))
 	mux.HandleFunc("/api/chat/upload", authMiddleware(handlers.GenerateChatMediaPresignedURL))
 	mux.HandleFunc("/api/unread-chat-count", authMiddleware(handlers.GetUnreadCountHandler))

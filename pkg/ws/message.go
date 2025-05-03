@@ -60,6 +60,10 @@ type WsMessage struct {
 	Content *string `json:"content,omitempty"`
 	Count   *int64  `json:"count,omitempty"`
 
+	LikePayload    *ContentLikeRequest `json:"like_payload,omitempty"`
+	DislikePayload *DislikeRequest     `json:"dislike_payload,omitempty"`
+	UnmatchPayload *UnmatchRequest     `json:"unmatch_payload,omitempty"`
+
 	LikerInfo   *WsBasicLikerInfo  `json:"liker_info,omitempty"`
 	MatchInfo   *WsMatchInfo       `json:"match_info,omitempty"`
 	RemovalInfo *WsLikeRemovalInfo `json:"removal_info,omitempty"`
