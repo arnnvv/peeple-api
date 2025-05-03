@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/arnnvv/peeple-api/migrations"
+	"github.com/go-redis/redis_rate/v10"
 	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
 )
@@ -22,14 +23,18 @@ type Hub struct {
 	redisClient *redis.Client
 	hubContext  context.Context
 	hubCancel   context.CancelFunc
+	rateLimiter *redis_rate.Limiter
 }
 
-func NewHub(db *migrations.Queries, rds *redis.Client) *Hub {
+func NewHub(db *migrations.Queries, rds *redis.Client, limiter *redis_rate.Limiter) *Hub {
 	if db == nil {
 		log.Fatal("FATAL: Hub created without database queries interface")
 	}
 	if rds == nil {
 		log.Fatal("FATAL: Hub created without Redis client")
+	}
+	if limiter == nil {
+		log.Fatal("FATAL: Hub created without Rate Limiter")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Hub{
@@ -40,6 +45,7 @@ func NewHub(db *migrations.Queries, rds *redis.Client) *Hub {
 		redisClient: rds,
 		hubContext:  ctx,
 		hubCancel:   cancel,
+		rateLimiter: limiter,
 	}
 }
 
@@ -162,6 +168,9 @@ func (h *Hub) handleRedisMessage(payload string) {
 	case RedisMsgTypeBroadcastMatches:
 		if len(redisMsg.TargetUserIDs) > 0 {
 			for _, targetID := range redisMsg.TargetUserIDs {
+				if targetID == redisMsg.SenderUserID {
+					continue
+				}
 				if client, ok := h.clients[targetID]; ok {
 					select {
 					case client.Send <- redisMsg.OriginalPayload:
@@ -345,7 +354,12 @@ func (h *Hub) BroadcastNewLike(recipientUserID int32, likerInfo WsBasicLikerInfo
 		OriginalPayload: messageBytes,
 		SenderUserID:    likerInfo.LikerUserID,
 	}
-	_ = h.publishToRedis(context.Background(), redisMsg)
+	err = h.publishToRedis(context.Background(), redisMsg)
+	if err != nil {
+		log.Printf("Hub WARN: Failed to publish new_like_received message for user %d via Redis: %v", recipientUserID, err)
+	} else {
+		log.Printf("Hub INFO: Published new_like_received notification via Redis for user %d.", recipientUserID)
+	}
 }
 
 func (h *Hub) BroadcastNewMatch(targetUserID int32, matchInfo WsMatchInfo) {
@@ -361,7 +375,12 @@ func (h *Hub) BroadcastNewMatch(targetUserID int32, matchInfo WsMatchInfo) {
 		OriginalPayload: messageBytes,
 		SenderUserID:    matchInfo.MatchedUserID,
 	}
-	_ = h.publishToRedis(context.Background(), redisMsg)
+	err = h.publishToRedis(context.Background(), redisMsg)
+	if err != nil {
+		log.Printf("Hub WARN: Failed to publish new_match message for user %d via Redis: %v", targetUserID, err)
+	} else {
+		log.Printf("Hub INFO: Published new_match notification via Redis for user %d.", targetUserID)
+	}
 }
 
 func (h *Hub) BroadcastLikeRemoved(recipientUserID int32, removalInfo WsLikeRemovalInfo) {
@@ -377,7 +396,12 @@ func (h *Hub) BroadcastLikeRemoved(recipientUserID int32, removalInfo WsLikeRemo
 		OriginalPayload: messageBytes,
 		SenderUserID:    removalInfo.LikerUserID,
 	}
-	_ = h.publishToRedis(context.Background(), redisMsg)
+	err = h.publishToRedis(context.Background(), redisMsg)
+	if err != nil {
+		log.Printf("Hub WARN: Failed to publish like_removed message for user %d via Redis: %v", recipientUserID, err)
+	} else {
+		log.Printf("Hub INFO: Published like_removed notification via Redis for user %d.", recipientUserID)
+	}
 }
 
 func (h *Hub) BroadcastMatchRemoved(recipientUserID int32, unmatcherUserID int32) {
@@ -394,5 +418,10 @@ func (h *Hub) BroadcastMatchRemoved(recipientUserID int32, unmatcherUserID int32
 		OriginalPayload: messageBytes,
 		SenderUserID:    unmatcherUserID,
 	}
-	_ = h.publishToRedis(context.Background(), redisMsg)
+	err = h.publishToRedis(context.Background(), redisMsg)
+	if err != nil {
+		log.Printf("Hub WARN: Failed to publish match_removed message for user %d via Redis: %v", recipientUserID, err)
+	} else {
+		log.Printf("Hub INFO: Published match_removed notification via Redis for user %d.", recipientUserID)
+	}
 }
