@@ -1,4 +1,3 @@
-// pkg/ws/hub.go
 package ws
 
 import (

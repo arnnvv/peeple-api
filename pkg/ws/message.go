@@ -3,8 +3,8 @@ package ws
 import (
 	"time"
 
-	"github.com/arnnvv/peeple-api/migrations" // Keep this
-	"github.com/jackc/pgx/v5/pgtype"          // Import pgtype for Timestamptz
+	"github.com/arnnvv/peeple-api/migrations"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type WsBasicLikerInfo struct {
