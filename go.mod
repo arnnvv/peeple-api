@@ -1,16 +1,16 @@
 module github.com/arnnvv/peeple-api
 
-go 1.24.2
+go 1.24.3
 
 require (
-	github.com/aws/aws-sdk-go v1.55.6
+	github.com/aws/aws-sdk-go v1.55.7
 	github.com/go-redis/redis_rate/v10 v10.0.1
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/jackc/pgx/v5 v5.7.4
 	github.com/redis/go-redis/v9 v9.8.0
-	github.com/stretchr/testify v1.8.1
-	golang.org/x/sync v0.10.0
+	github.com/stretchr/testify v1.10.0
+	golang.org/x/sync v0.14.0
 )
 
 require (

@@ -165,16 +165,16 @@ func (c *Client) readPump() {
 				}
 				createParams.MessageText = pgtype.Text{
 					String: *msg.Text,
-					Valid: true,
+					Valid:  true,
 				}
 			} else if msg.MediaURL != nil && *msg.MediaURL != "" && msg.MediaType != nil && *msg.MediaType != "" {
 				createParams.MediaUrl = pgtype.Text{
 					String: *msg.MediaURL,
-					Valid: true,
+					Valid:  true,
 				}
 				createParams.MediaType = pgtype.Text{
 					String: *msg.MediaType,
-					Valid: true,
+					Valid:  true,
 				}
 				isMedia = true
 			} else {
